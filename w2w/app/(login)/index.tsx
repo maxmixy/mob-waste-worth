@@ -120,7 +120,7 @@ export default function LoginPage() {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.button, styles.signupButton]}
-        onPress={() => alert('Sign up not implemented')}
+        onPress={() => router.replace('(tabs)')}
       >
         <ThemedText style={styles.buttonText}>Sign Up</ThemedText>
       </TouchableOpacity>
