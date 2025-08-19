@@ -1,13 +1,16 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, TouchableOpacity, TextInput } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { getAuth, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential, createUserWithEmailAndPassword } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import { makeRedirectUri } from 'expo-auth-session';
 
 // Firebase config (move to a separate file if needed)
 const firebaseConfig = {
@@ -21,6 +24,8 @@ const firebaseConfig = {
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+
+WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginPage() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -37,20 +42,63 @@ export default function LoginPage() {
       await signInWithEmailAndPassword(auth, email, password);
       router.replace('/');
     } catch (err: any) {
-      setError(err.message);
+      // Normalize and show friendly error message
+      const message = err?.message || err?.code || 'Login failed. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSignUp = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      // Optionally you can send verification or set profile here
+      router.replace('/');
+    } catch (err: any) {
+      const message = err?.message || err?.code || 'Sign up failed. Please try again.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Configure Google auth request (use Expo proxy in dev)  
+  const redirectUri = makeRedirectUri({ useProxy: true, scheme: 'wastetoworth' });
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    webClientId: '648267234726-q90cnh8men8ffntu76te6t69t07rhmjv.apps.googleusercontent.com',
+    redirectUri,
+    scopes: ['profile', 'email'],
+  });
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token, access_token } = response.params;
+      const credential = GoogleAuthProvider.credential(id_token, access_token);
+      // Sign in with the Firebase credential
+      signInWithCredential(auth, credential)
+        .then(() => {
+          router.replace('/');
+        })
+        .catch((e: any) => {
+          const message = e?.message || e?.code || 'Google sign-in failed.';
+          setError(message);
+        });
+    } else if (response?.type === 'error') {
+      setError('Google sign-in cancelled or failed.');
+    }
+  }, [response]);
+
   const handleGoogleLogin = async () => {
     setError('');
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      router.replace('/');
+      // Launch the native/web auth flow using the Expo proxy in development
+      await promptAsync({ useProxy: true });
     } catch (err: any) {
-      setError('Google login failed.');
+      const message = err?.message || err?.code || 'Google login failed.';
+      setError(message);
     }
   };
 
@@ -87,7 +135,8 @@ export default function LoginPage() {
           autoCapitalize="none"
           keyboardType="email-address"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(text) => { setEmail(text); setError(''); }}
+          onFocus={() => setError('')}
           placeholder="Enter your email"
           placeholderTextColor="#888"
         />
@@ -105,12 +154,17 @@ export default function LoginPage() {
           }}
           secureTextEntry
           value={password}
-          onChangeText={setPassword}
+          onChangeText={(text) => { setPassword(text); setError(''); }}
+          onFocus={() => setError('')}
           placeholder="Enter your password"
           placeholderTextColor="#888"
         />
       </ThemedView>
-      {error ? <ThemedText style={{ color: 'red', marginBottom: 8 }}>{error}</ThemedText> : null}
+      {error ? (
+        <ThemedView style={styles.errorBox}>
+          <ThemedText style={styles.errorText}>{error}</ThemedText>
+        </ThemedView>
+      ) : null}
       <TouchableOpacity
         style={[styles.button, styles.signupButton]}
         onPress={handleLogin}
@@ -120,7 +174,7 @@ export default function LoginPage() {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.button, styles.signupButton]}
-        onPress={() => router.replace('(tabs)')}
+        onPress={handleSignUp}
       >
         <ThemedText style={styles.buttonText}>Sign Up</ThemedText>
       </TouchableOpacity>
@@ -229,5 +283,17 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     maxWidth: 320,
     alignSelf: 'center',
+  },
+  errorBox: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#fdecea',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  errorText: {
+    color: '#b00020',
+    fontWeight: '600',
   },
 });
