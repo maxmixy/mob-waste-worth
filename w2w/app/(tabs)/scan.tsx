@@ -3,17 +3,23 @@ import { BlurView } from 'expo-blur';
 import { StyleSheet } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
+import { Platform, Alert } from 'react-native';
+import { ActivityIndicator } from 'react-native';
 
 import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 
+// Update this URL to the address where your PHP endpoint is reachable from the device/emulator
+const UPLOAD_URL = 'https://red-goat-592690.hostingersite.com/upload.php';
+
 export default function HomeScreen() {
     const isFocused = useIsFocused();
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const cameraRef = useRef<CameraView>(null);
     const [isCameraReady, setIsCameraReady] = useState(false);
+    const [uploading, setUploading] = useState(false);
     
     useEffect(() => {
         if (!cameraPermission?.granted) {
@@ -39,11 +45,59 @@ export default function HomeScreen() {
     const handleCaptureImage = async () => {
         if (cameraRef.current) {
             try {
-                const photo = await cameraRef.current.takePictureAsync();
+                const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
                 // Handle the captured photo as needed
                 console.log('Captured photo:', photo);
+                // Upload the photo to the server
+                setUploading(true);
+                const uri = photo.uri;
+                const filename = uri.split('/').pop() || 'photo.jpg';
+                const match = filename.match(/\.([0-9a-zA-Z]+)$/);
+                const ext = match ? match[1] : 'jpg';
+                const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+
+                // Create a blob from the local file URI and append it to FormData.
+                // This is more reliable than passing the `{ uri, name, type }` object on some platforms.
+                let res;
+                try {
+                    const fileResponse = await fetch(uri);
+                    const blob = await fileResponse.blob();
+
+                    const form = new FormData();
+                    form.append('image', blob as any, filename);
+
+                    res = await fetch(UPLOAD_URL, {
+                        method: 'POST',
+                        body: form,
+                        // let fetch set Content-Type including boundary
+                    });
+                } catch (uploadErr) {
+                    console.error('Upload failed (blob fallback):', uploadErr);
+                    // Try fallback: append uri object (some environments accept this)
+                    try {
+                        const form2 = new FormData();
+                        form2.append('image', {
+                            uri: uri,
+                            name: filename,
+                            type: mime,
+                        } as any);
+                        res = await fetch(UPLOAD_URL, { method: 'POST', body: form2 });
+                    } catch (uploadErr2) {
+                        console.error('Upload fallback also failed:', uploadErr2);
+                        throw uploadErr2;
+                    }
+                }
+ 
+                 const text = await res.text();
+                 let json = null;
+                 try { json = JSON.parse(text); } catch (e) { json = { raw: text }; }
+                 console.log('Upload response', json);
+                 Alert.alert('Upload result', JSON.stringify(json?.classification || json));
+                 setUploading(false);
             } catch (error) {
+                setUploading(false);
                 console.error('Error capturing photo:', error);
+                Alert.alert('Error', String(error));
             }
         }
     };
@@ -64,7 +118,11 @@ export default function HomeScreen() {
             </ThemedView>
             {/* Capture Image Button */}
             <ThemedView style={styles.captureButtonContainer} pointerEvents="auto">
-                <ThemedText style={styles.captureButton} onPress={handleCaptureImage}>Capture</ThemedText>
+                {uploading ? (
+                    <ActivityIndicator size="large" color="#fff" />
+                ) : (
+                    <ThemedText style={styles.captureButton} onPress={handleCaptureImage}>Capture</ThemedText>
+                )}
             </ThemedView>
         </ThemedView>
     );

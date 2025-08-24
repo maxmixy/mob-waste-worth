@@ -6,11 +6,12 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { getAuth, signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential, createUserWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { makeRedirectUri } from 'expo-auth-session';
+import { saveUserId } from '@/lib/user';
 
 // Firebase config (move to a separate file if needed)
 const firebaseConfig = {
@@ -39,26 +40,15 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      // Persist uid for later pages
+      if (userCredential?.user?.uid) {
+        await saveUserId(userCredential.user.uid);
+      }
       router.replace('/');
     } catch (err: any) {
       // Normalize and show friendly error message
       const message = err?.message || err?.code || 'Login failed. Please try again.';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSignUp = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      // Optionally you can send verification or set profile here
-      router.replace('/');
-    } catch (err: any) {
-      const message = err?.message || err?.code || 'Sign up failed. Please try again.';
       setError(message);
     } finally {
       setLoading(false);
@@ -79,8 +69,12 @@ export default function LoginPage() {
       const credential = GoogleAuthProvider.credential(id_token, access_token);
       // Sign in with the Firebase credential
       signInWithCredential(auth, credential)
-        .then(() => {
-          router.replace('/');
+        .then(async (uc: any) => {
+          // Save uid after Google sign-in
+          if (uc?.user?.uid) {
+            await saveUserId(uc.user.uid);
+          }
+          router.replace('(tabs)/scan');
         })
         .catch((e: any) => {
           const message = e?.message || e?.code || 'Google sign-in failed.';
@@ -95,7 +89,8 @@ export default function LoginPage() {
     setError('');
     try {
       // Launch the native/web auth flow using the Expo proxy in development
-      await promptAsync({ useProxy: true });
+      await (promptAsync as any)({ useProxy: true });
+      router.replace('(tabs)/scan');
     } catch (err: any) {
       const message = err?.message || err?.code || 'Google login failed.';
       setError(message);
@@ -174,7 +169,7 @@ export default function LoginPage() {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.button, styles.signupButton]}
-        onPress={handleSignUp}
+        onPress={() => router.push('signup')}
       >
         <ThemedText style={styles.buttonText}>Sign Up</ThemedText>
       </TouchableOpacity>
