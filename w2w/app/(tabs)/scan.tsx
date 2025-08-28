@@ -5,14 +5,21 @@ import { useEffect, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { Platform, Alert } from 'react-native';
 import { ActivityIndicator } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 
 import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 
-// Update this URL to the address where your PHP endpoint is reachable from the device/emulator
-const UPLOAD_URL = 'https://red-goat-592690.hostingersite.com/upload.php';
+// Update this URL to the address where your backend is reachable from the device/emulator.
+// For local Python backend (this repo) the endpoint is POST /upload on port 5000.
+// Common development values:
+// - Android emulator (default): http://10.0.2.2:5000/upload
+// - iOS simulator / Expo on same machine: http://127.0.0.1:5000/upload
+// - Real device on same LAN: http://<YOUR_MACHINE_IP>:5000/upload
+// Change to the appropriate value for your testing environment.
+const UPLOAD_URL = 'http://127.0.0.1:5000/upload';
 
 export default function HomeScreen() {
     const isFocused = useIsFocused();
@@ -56,35 +63,53 @@ export default function HomeScreen() {
                 const ext = match ? match[1] : 'jpg';
                 const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
 
-                // Create a blob from the local file URI and append it to FormData.
-                // This is more reliable than passing the `{ uri, name, type }` object on some platforms.
+                // Try RN-friendly FormData first (uri object). Many native environments
+                // expect the `{ uri, name, type }` entry. If that fails, fall back to
+                // uploading a blob, and finally fall back to a JSON base64 body.
                 let res;
+                // 1) Try FormData with { uri, name, type }
                 try {
-                    const fileResponse = await fetch(uri);
-                    const blob = await fileResponse.blob();
-
                     const form = new FormData();
-                    form.append('image', blob as any, filename);
-
+                    form.append('image', {
+                        uri: uri,
+                        name: filename,
+                        type: mime,
+                    } as any);
+                    
                     res = await fetch(UPLOAD_URL, {
                         method: 'POST',
                         body: form,
-                        // let fetch set Content-Type including boundary
+                        // do NOT set Content-Type header; let fetch set multipart boundary
                     });
-                } catch (uploadErr) {
-                    console.error('Upload failed (blob fallback):', uploadErr);
-                    // Try fallback: append uri object (some environments accept this)
+                } catch (err1) {
+                    console.warn('FormData {uri} upload failed, trying blob fallback:', err1);
+                    // 2) Blob fallback
                     try {
-                        const form2 = new FormData();
-                        form2.append('image', {
-                            uri: uri,
-                            name: filename,
-                            type: mime,
-                        } as any);
-                        res = await fetch(UPLOAD_URL, { method: 'POST', body: form2 });
-                    } catch (uploadErr2) {
-                        console.error('Upload fallback also failed:', uploadErr2);
-                        throw uploadErr2;
+                        const fileResponse = await fetch(uri);
+                        const blob = await fileResponse.blob();
+
+                        const form = new FormData();
+                        form.append('image', blob as any, filename);
+
+                        res = await fetch(UPLOAD_URL, {
+                            method: 'POST',
+                            body: form,
+                        });
+                    } catch (err2) {
+                        console.warn('Blob upload failed, trying JSON/base64 fallback:', err2);
+                        // 3) JSON base64 fallback (uses expo-file-system to read file as base64)
+                        try {
+                            const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+                            const dataUrl = `data:${mime};base64,${b64}`;
+                            res = await fetch(UPLOAD_URL, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ image: dataUrl }),
+                            });
+                        } catch (err3) {
+                            console.error('All upload methods failed:', err1, err2, err3);
+                            throw err3;
+                        }
                     }
                 }
  

@@ -61,7 +61,7 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       if (userCredential?.user?.uid) {
         await saveUserId(userCredential.user.uid);
-        router.replace('(tabs)');
+        router.replace('/(tabs)');
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -89,7 +89,7 @@ export default function LoginPage() {
       signInWithCredential(auth, credential)
         .then(async (uc: any) => {
           if (uc?.user?.uid) await saveUserId(uc.user.uid);
-          router.replace('(tabs)/scan');
+          router.replace('/(tabs)/scan');
         })
         .catch(() => setEmailError('Google sign-in failed.'));
     } else if (response?.type === 'error') {
