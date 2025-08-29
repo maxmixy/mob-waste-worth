@@ -6,6 +6,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { Platform, Alert } from 'react-native';
 import { ActivityIndicator } from 'react-native';
 import * as FileSystem from 'expo-file-system';
+import { router } from 'expo-router';
 
 import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
@@ -117,7 +118,13 @@ export default function HomeScreen() {
                  let json = null;
                  try { json = JSON.parse(text); } catch (e) { json = { raw: text }; }
                  console.log('Upload response', json);
-                 Alert.alert('Upload result', JSON.stringify(json?.classification || json));
+                 
+                 // Navigate to detail page with the scan data
+                 router.push({
+                     pathname: '/pages/detail',
+                     params: { scanData: JSON.stringify(json) }
+                 });
+                 
                  setUploading(false);
             } catch (error) {
                 setUploading(false);
@@ -139,7 +146,8 @@ export default function HomeScreen() {
             <ThemedView style={styles.topWindow} pointerEvents="none" />
             <ThemedView style={styles.bottomWindow} pointerEvents="none">
                 <ThemedText type="title" style={styles.centeredText}>Scan Your Waste</ThemedText>
-                <ThemedText type="subtitle" style={styles.centeredText}>Point the camera at your waste item. Ensure that the item is in clear view, with no obstructions.</ThemedText>
+                <ThemedText type="subtitle" style={styles.centeredText}>Hold your waste item steady in front of the camera. <br/>
+                Make sure it’s fully visible and nothing is blocking the view.</ThemedText>
             </ThemedView>
             {/* Capture Image Button */}
             <ThemedView style={styles.captureButtonContainer} pointerEvents="auto">
