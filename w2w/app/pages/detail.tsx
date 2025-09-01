@@ -70,7 +70,9 @@ export default function DetailScreen() {
         try {
             const response = await fetch(`${API_BASE_URL}/disposal/${materialId}`);
             if (!response.ok) throw new Error('Failed to fetch disposal methods');
-            return await response.json();
+            const data = await response.json();
+            // Handle both string and object responses
+            return typeof data === 'string' ? data : data.methods || '';
         } catch (error) {
             console.error('Error fetching disposal methods:', error);
             return '';

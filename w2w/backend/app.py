@@ -318,20 +318,185 @@ def get_disposal_methods(material_id):
             return jsonify({'error': 'Database not initialized'}), 500
         
         # Get material details to determine disposal methods
-        material_doc = db.collection('Disposal').document(material_id).get()
+        material_doc = db.collection('Materials').document(material_id).get()
         
         if not material_doc.exists:
-            return jsonify({'methods': 'Disposal method not available for this material.'})
+            # Try to find by name
+            docs = db.collection('Materials').where('Name', '==', material_id).stream()
+            materials = [d.to_dict() for d in docs]
+            if not materials:
+                return jsonify('Disposal method not available for this material.')
+            material_data = materials[0]
         else:
             material_data = material_doc.to_dict()
         
         # Generate disposal methods based on material traits
         disposal_methods = generate_disposal_methods(material_data)
         
-        return jsonify({'methods': disposal_methods})
+        return jsonify(disposal_methods)
         
     except Exception as e:
         print(f"Error fetching disposal methods: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def generate_disposal_methods(material_data):
+    """Generate disposal methods based on material traits"""
+    traits = material_data.get('Traits', [])
+    name = material_data.get('Name', '').lower()
+    
+    disposal_methods = []
+    
+    # Basic disposal methods based on material type
+    if 'plastic' in name or any('plastic' in trait.lower() for trait in traits):
+        disposal_methods.append("Rinse thoroughly and place in blue recycling bin.")
+        disposal_methods.append("Remove caps and labels if possible.")
+        disposal_methods.append("Check local recycling guidelines for specific requirements.")
+    
+    elif 'glass' in name or any('glass' in trait.lower() for trait in traits):
+        disposal_methods.append("Rinse thoroughly and place in glass recycling bin.")
+        disposal_methods.append("Handle carefully to avoid breakage.")
+        disposal_methods.append("Some areas accept glass in general recycling.")
+    
+    elif 'metal' in name or any('metal' in trait.lower() for trait in traits):
+        disposal_methods.append("Rinse and place in metal recycling bin.")
+        disposal_methods.append("Crush cans to save space if allowed.")
+        disposal_methods.append("Check for local scrap metal collection.")
+    
+    elif 'paper' in name or any('paper' in trait.lower() for trait in traits):
+        disposal_methods.append("Place in paper recycling bin.")
+        disposal_methods.append("Remove any non-paper attachments.")
+        disposal_methods.append("Keep dry and clean.")
+    
+    else:
+        disposal_methods.append("Check local waste management guidelines.")
+        disposal_methods.append("Consider if the item can be reused or repurposed.")
+        disposal_methods.append("Contact local recycling center for specific instructions.")
+    
+    return " ".join(disposal_methods)
+
+
+def has_trait_overlap(traits1, traits2):
+    """Check if two materials have overlapping traits"""
+    if not traits1 or not traits2:
+        return False
+    
+    # Normalize traits for comparison
+    normalized_traits1 = {trait.lower().strip() for trait in traits1}
+    normalized_traits2 = {trait.lower().strip() for trait in traits2}
+    
+    # Check for overlap
+    overlap = normalized_traits1.intersection(normalized_traits2)
+    return len(overlap) > 0
+
+
+@app.route('/related/<material_id>', methods=['GET'])
+def get_related_materials(material_id):
+    """Get related materials based on traits"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get current material traits
+        material_doc = db.collection('Materials').document(material_id).get()
+        
+        if not material_doc.exists:
+            # Try to find by name
+            docs = db.collection('Materials').where('Name', '==', material_id).stream()
+            materials = [d.to_dict() for d in docs]
+            if not materials:
+                return jsonify([])
+            current_material = materials[0]
+        else:
+            current_material = material_doc.to_dict()
+        
+        # Find materials with similar traits
+        related_materials = []
+        all_materials = db.collection('Materials').stream()
+        
+        for doc in all_materials:
+            if doc.id != material_id:
+                material_data = doc.to_dict()
+                # Check for trait overlap
+                if has_trait_overlap(current_material.get('Traits', []), material_data.get('Traits', [])):
+                    related_materials.append({
+                        **material_data,
+                        'id': doc.id
+                    })
+        
+        # Return top 3 related materials
+        return jsonify(related_materials[:3])
+        
+    except Exception as e:
+        print(f"Error fetching related materials: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>/materials', methods=['GET'])
+def get_user_materials(user_id):
+    """Get all material IDs for a specific user"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        
+        if not user_doc.exists:
+            return jsonify([])
+        
+        user_data = user_doc.to_dict()
+        materials = user_data.get('Materials', [])
+        
+        return jsonify(materials)
+        
+    except Exception as e:
+        print(f"Error fetching user materials: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>', methods=['GET'])
+def get_user_data(user_id):
+    """Get user data including current project"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_doc.to_dict()
+        
+        return jsonify(user_data)
+        
+    except Exception as e:
+        print(f"Error fetching user data: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/recycling/<project_id>', methods=['GET'])
+def get_recycling_project(project_id):
+    """Get recycling project details from Recycling collection"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get project document from Recycling collection
+        project_doc = db.collection('Recycling').document(project_id).get()
+        
+        if not project_doc.exists:
+            return jsonify({'error': 'Project not found'}), 404
+        
+        project_data = project_doc.to_dict()
+        project_data['id'] = project_doc.id
+        
+        return jsonify(project_data)
+        
+    except Exception as e:
+        print(f"Error fetching recycling project: {e}")
         return jsonify({'error': str(e)}), 500
 
 
