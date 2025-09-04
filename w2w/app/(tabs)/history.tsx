@@ -1,15 +1,13 @@
 import { Image } from 'expo-image';
-import { Platform, StyleSheet, View, Pressable, Modal, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 
-import { HelloWave } from '@/components/HelloWave';
-import { ScrollView as RNScrollView } from 'react-native';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { Colors } from '@/constants/Colors';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId } from '@/lib/user';
+import { ScrollView as RNScrollView } from 'react-native';
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 

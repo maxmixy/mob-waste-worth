@@ -499,6 +499,159 @@ def get_recycling_project(project_id):
         print(f"Error fetching recycling project: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/posts', methods=['GET', 'POST'])
+def posts():
+    """GET: Fetch all posts with media, likes, and comments
+       POST: Create a new post"""
+    
+    if request.method == 'GET':
+        try:
+            if db is None:
+                return jsonify({'error': 'Database not initialized'}), 500
+
+            posts_ref = db.collection('Posts').order_by("created_at", direction=firestore.Query.DESCENDING).stream()
+            posts = []
+
+            for post_doc in posts_ref:
+                post_data = post_doc.to_dict()
+                post_id = post_doc.id
+
+                # Fetch media (without ordering to avoid index requirement)
+                media_docs = db.collection('Post_Media').where('post_id', '==', post_id).stream()
+                media = [m.to_dict() for m in media_docs]
+                # Sort media by order_index in Python instead
+                media.sort(key=lambda x: x.get('order_index', 0))
+
+                # Fetch likes (doc id is the post id)
+                likes_doc = db.collection('Post_Likes').document(post_id).get()
+                likes = likes_doc.to_dict().get("user_id", []) if likes_doc.exists else []
+
+                # Fetch comments (without ordering to avoid index requirement)
+                comments_docs = db.collection('Post_Comments').where('post_id', '==', post_id).stream()
+                comments = [c.to_dict() for c in comments_docs]
+                # Sort comments by created_at in Python instead
+                comments.sort(key=lambda x: x.get('created_at', ''))
+
+                posts.append({
+                    "id": post_id,
+                    "user_id": post_data.get("user_id"),
+                    "content_text": post_data.get("content_text"),
+                    "status": post_data.get("status"),
+                    "created_at": post_data.get("created_at"),
+                    "updated_at": post_data.get("updated_at"),
+                    "media": media,
+                    "likes": likes,
+                    "comments": comments
+                })
+
+            return jsonify(posts)
+
+        except Exception as e:
+            print(f"Error fetching posts: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    elif request.method == 'POST':
+        try:
+            if db is None:
+                return jsonify({'error': 'Database not initialized'}), 500
+            
+            data = request.get_json()
+            user_id = data.get('user_id')
+            content_text = data.get('content_text')
+            status = data.get('status', 'published')
+            
+            if not user_id or not content_text:
+                return jsonify({'error': 'Missing user_id or content_text'}), 400
+            
+            # Create new post document
+            post_ref = db.collection('Posts').document()
+            post_data = {
+                'user_id': user_id,
+                'content_text': content_text,
+                'status': status,
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow()
+            }
+            post_ref.set(post_data)
+            
+            print(f"Created new post {post_ref.id} for user {user_id}")
+            return jsonify({'success': True, 'post_id': post_ref.id, 'message': 'Post created successfully'})
+            
+        except Exception as e:
+            print(f"Error creating post: {e}")
+            return jsonify({'error': str(e)}), 500
+
+@app.route('/posts/<post_id>/like', methods=['POST'])
+def like_post(post_id):
+    """Toggle like for a post"""
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+
+        doc_ref = db.collection('Post_Likes').document(post_id)
+        doc = doc_ref.get()
+
+        if doc.exists:
+            # Get current likes array
+            current_data = doc.to_dict()
+            likes = current_data.get("user_id", [])
+            
+            if user_id in likes:
+                # Unlike - remove user_id from array
+                likes.remove(user_id)
+                doc_ref.update({
+                    "user_id": likes
+                })
+                print(f"Removed like from user {user_id} for post {post_id}")
+                return jsonify({"liked": False, "message": "Like removed"})
+            else:
+                # Like - add user_id to array
+                likes.append(user_id)
+                doc_ref.update({
+                    "user_id": likes
+                })
+                print(f"Added like from user {user_id} for post {post_id}")
+                return jsonify({"liked": True, "message": "Post liked"})
+        else:
+            # Create new doc if post has no likes yet
+            doc_ref.set({"user_id": [user_id]})
+            print(f"Created new likes document for post {post_id} with user {user_id}")
+            return jsonify({"liked": True, "message": "Post liked"})
+
+    except Exception as e:
+        print(f"Error liking post: {e}")
+        return jsonify({"error": str(e)}), 500
+
+from datetime import datetime
+
+@app.route('/posts/<post_id>/comment', methods=['POST'])
+def comment_post(post_id):
+    """Add a comment to a post"""
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        comment_text = data.get("comment_text")
+
+        if not user_id or not comment_text:
+            return jsonify({"error": "Missing user_id or comment_text"}), 400
+
+        comment_ref = db.collection("Post_Comments").document()
+        comment_data = {
+            "post_id": post_id,
+            "user_id": user_id,
+            "comment_text": comment_text,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        comment_ref.set(comment_data)
+
+        return jsonify({"success": True, "comment": {**comment_data, "id": comment_ref.id}})
+    except Exception as e:
+        print(f"Error adding comment: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     # Listen on all interfaces so the mobile device / emulator can reach it.
