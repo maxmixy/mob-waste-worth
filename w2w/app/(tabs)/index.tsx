@@ -2,7 +2,6 @@ import { Image } from 'expo-image';
 import { StyleSheet, View, ActivityIndicator } from 'react-native';
 import { Pressable } from 'react-native';
 import { useState, useEffect } from 'react';
-import { Modal, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -12,7 +11,8 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { getUserId } from '@/lib/user';
+import { getUserId, checkProfileCompletion } from '@/lib/user';
+import SettingsSidebar from '@/components/SettingsSidebar';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -59,6 +59,7 @@ export default function HomeScreen() {
   const [userProjects, setUserProjects] = useState<ProjectData[]>([]);
   const [currentProject, setCurrentProject] = useState<CurrentProjectData | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('User');
@@ -124,16 +125,23 @@ export default function HomeScreen() {
           return;
         }
 
-        // Fetch user's materials and current project
-        const [userMaterialsData, userDataResponse] = await Promise.all([
+        // Fetch user's materials, current project, and profile
+        const [userMaterialsData, userDataResponse, profileInfo] = await Promise.all([
           fetchUserMaterials(userId),
-          fetch(`${API_BASE_URL}/user/${userId}`).then(res => res.ok ? res.json() : null)
+          fetch(`${API_BASE_URL}/user/${userId}`).then(res => res.ok ? res.json() : null),
+          checkProfileCompletion(userId)
         ]);
         
         // Set user data
         if (userDataResponse) {
           setUserData(userDataResponse);
           setUserName(userDataResponse.name || 'User');
+        }
+        
+        // Set profile data
+        if (profileInfo.profileCompleted && profileInfo.profileData) {
+          setUserProfile(profileInfo.profileData);
+          setUserName(`${profileInfo.profileData.firstName} ${profileInfo.profileData.lastName}`);
         }
         
         // Fetch current project if user has one
@@ -198,6 +206,10 @@ export default function HomeScreen() {
 
   return (
     <>
+      <SettingsSidebar 
+        visible={sidebarVisible} 
+        onClose={() => setSidebarVisible(false)} 
+      />
       <View
         style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
       >
@@ -338,32 +350,6 @@ export default function HomeScreen() {
           </ThemedView>
         </View>
       </View>
-      {/* Sidebar Modal */}
-      <Modal
-        visible={sidebarVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setSidebarVisible(false)}
-      >
-        <TouchableOpacity style={styles.sidebarOverlay} activeOpacity={1} onPress={() => setSidebarVisible(false)} />
-        <View style={styles.sidebarContainer}>
-          {/* User Profile at the top of sidebar */}
-          <View style={styles.sidebarProfile}>
-            <View style={styles.userImageContainer}>
-              <Image
-                source={require('@/assets/images/partial-react-logo.png')}
-                style={styles.userImage}
-                resizeMode="cover"
-              />
-            </View>
-            <ThemedText style={styles.userName}>{userName}</ThemedText>
-            <ThemedText style={styles.materialCount}>
-              {userMaterials.length} materials scanned
-            </ThemedText>
-          </View>
-          {/* Add more sidebar content here */}
-        </View>
-      </Modal>
     </>
   );
 }

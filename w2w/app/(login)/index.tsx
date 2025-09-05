@@ -11,7 +11,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { makeRedirectUri } from 'expo-auth-session';
-import { saveUserId } from '@/lib/user';
+import { saveUserId, checkEULAAcceptance, checkProfileCompletion } from '@/lib/user';
 
 // ✅ Firebase config
 const firebaseConfig = {
@@ -61,7 +61,26 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       if (userCredential?.user?.uid) {
         await saveUserId(userCredential.user.uid);
-        router.replace('/(tabs)');
+        
+        // Check EULA acceptance status
+        const eulaStatus = await checkEULAAcceptance(userCredential.user.uid);
+        
+        if (!eulaStatus.eulaAccepted) {
+          // User needs to accept EULA first
+          router.replace('/(login)/eula');
+          return;
+        }
+
+        // Check profile completion status
+        const profileStatus = await checkProfileCompletion(userCredential.user.uid);
+        
+        if (!profileStatus.profileCompleted) {
+          // User needs to create their profile
+          router.replace('/(login)/profile');
+        } else {
+          // User has completed both EULA and profile, proceed to main app
+          router.replace('/(tabs)');
+        }
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -75,7 +94,7 @@ export default function LoginPage() {
   };
 
   // ✅ Google auth
-  const redirectUri = makeRedirectUri({ useProxy: true, scheme: 'wastetoworth' });
+  const redirectUri = makeRedirectUri({ scheme: 'wastetoworth' });
   const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: '648267234726-q90cnh8men8ffntu76te6t69t07rhmjv.apps.googleusercontent.com',
     redirectUri,
@@ -88,8 +107,29 @@ export default function LoginPage() {
       const credential = GoogleAuthProvider.credential(id_token, access_token);
       signInWithCredential(auth, credential)
         .then(async (uc: any) => {
-          if (uc?.user?.uid) await saveUserId(uc.user.uid);
-          router.replace('/(tabs)/scan');
+          if (uc?.user?.uid) {
+            await saveUserId(uc.user.uid);
+            
+            // Check EULA acceptance status
+            const eulaStatus = await checkEULAAcceptance(uc.user.uid);
+            
+            if (!eulaStatus.eulaAccepted) {
+              // User needs to accept EULA first
+              router.replace('/(login)/eula');
+              return;
+            }
+
+            // Check profile completion status
+            const profileStatus = await checkProfileCompletion(uc.user.uid);
+            
+            if (!profileStatus.profileCompleted) {
+              // User needs to create their profile
+              router.replace('/(login)/profile');
+            } else {
+              // User has completed both EULA and profile, proceed to main app
+              router.replace('/(tabs)');
+            }
+          }
         })
         .catch(() => setEmailError('Google sign-in failed.'));
     } else if (response?.type === 'error') {
@@ -99,7 +139,7 @@ export default function LoginPage() {
 
   const handleGoogleLogin = async () => {
     try {
-      await (promptAsync as any)({ useProxy: true });
+      await promptAsync();
     } catch {
       setEmailError('Google login failed.');
     }
@@ -162,7 +202,7 @@ export default function LoginPage() {
       {/* Sign up button */}
       <TouchableOpacity
         style={[styles.button, { marginTop: 12 }]}
-        onPress={() => router.push('signup')}
+        onPress={() => router.push('/(login)/signup')}
       >
         <ThemedText style={styles.buttonText}>Create account</ThemedText>
       </TouchableOpacity>

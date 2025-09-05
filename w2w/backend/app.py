@@ -2,6 +2,8 @@ import io
 import os
 import base64
 import tempfile
+import random
+import uuid
 from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -651,6 +653,716 @@ def comment_post(post_id):
     except Exception as e:
         print(f"Error adding comment: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/user/<user_id>/eula', methods=['GET', 'POST'])
+def handle_eula(user_id):
+    """GET: Check if user has accepted EULA
+       POST: Update user's EULA acceptance status"""
+    
+    if request.method == 'GET':
+        try:
+            if db is None:
+                return jsonify({'error': 'Database not initialized'}), 500
+            
+            # Get user document
+            user_doc = db.collection('User_collection').document(user_id).get()
+            
+            if not user_doc.exists:
+                return jsonify({'eulaAccepted': False, 'isNewUser': True})
+            
+            user_data = user_doc.to_dict()
+            eula_accepted = user_data.get('eulaAccepted', False)
+            
+            return jsonify({
+                'eulaAccepted': eula_accepted,
+                'isNewUser': False,
+                'eulaAcceptedAt': user_data.get('eulaAcceptedAt')
+            })
+            
+        except Exception as e:
+            print(f"Error checking EULA status: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    elif request.method == 'POST':
+        try:
+            if db is None:
+                return jsonify({'error': 'Database not initialized'}), 500
+            
+            data = request.get_json()
+            eula_accepted = data.get('eulaAccepted', False)
+            
+            if not isinstance(eula_accepted, bool):
+                return jsonify({'error': 'eulaAccepted must be a boolean'}), 400
+            
+            # Get user document
+            user_doc = db.collection('User_collection').document(user_id).get()
+            
+            if user_doc.exists:
+                # Update existing user document
+                update_data = {
+                    'eulaAccepted': eula_accepted,
+                    'eulaAcceptedAt': datetime.utcnow() if eula_accepted else None
+                }
+                db.collection('User_collection').document(user_id).update(update_data)
+                print(f"Updated EULA status for user {user_id}: {eula_accepted}")
+            else:
+                # Create new user document with EULA status
+                user_data = {
+                    'eulaAccepted': eula_accepted,
+                    'eulaAcceptedAt': datetime.utcnow() if eula_accepted else None,
+                    'createdAt': datetime.utcnow()
+                }
+                db.collection('User_collection').document(user_id).set(user_data)
+                print(f"Created new user document for {user_id} with EULA status: {eula_accepted}")
+            
+            return jsonify({
+                'success': True,
+                'eulaAccepted': eula_accepted,
+                'message': 'EULA status updated successfully'
+            })
+            
+        except Exception as e:
+            print(f"Error updating EULA status: {e}")
+            return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>/profile', methods=['GET', 'POST'])
+def handle_profile(user_id):
+    """GET: Check if user has completed their profile
+       POST: Update user's profile data"""
+    
+    if request.method == 'GET':
+        try:
+            if db is None:
+                return jsonify({'error': 'Database not initialized'}), 500
+            
+            # Get user document
+            user_doc = db.collection('User_collection').document(user_id).get()
+            
+            if not user_doc.exists:
+                return jsonify({'profileCompleted': False, 'isNewUser': True})
+            
+            user_data = user_doc.to_dict()
+            profile_completed = user_data.get('profileCompleted', False)
+            
+            # Extract profile data
+            profile_data = {
+                'firstName': user_data.get('firstName'),
+                'lastName': user_data.get('lastName'),
+                'age': user_data.get('age'),
+                'location': user_data.get('location'),
+                'interests': user_data.get('interests'),
+                'profileCreatedAt': user_data.get('profileCreatedAt')
+            }
+            
+            return jsonify({
+                'profileCompleted': profile_completed,
+                'profileData': profile_data,
+                'isNewUser': False
+            })
+            
+        except Exception as e:
+            print(f"Error checking profile completion: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    elif request.method == 'POST':
+        try:
+            if db is None:
+                return jsonify({'error': 'Database not initialized'}), 500
+            
+            data = request.get_json()
+            
+            # Validate required fields
+            required_fields = ['firstName', 'lastName', 'age', 'profileCompleted']
+            for field in required_fields:
+                if field not in data:
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
+            
+            # Validate age
+            try:
+                age = int(data['age'])
+                if age < 18 or age > 120:
+                    return jsonify({'error': 'Age must be between 18 and 120'}), 400
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Age must be a valid number'}), 400
+            
+            # Get user document
+            user_doc = db.collection('User_collection').document(user_id).get()
+            
+            if user_doc.exists:
+                # Update existing user document
+                update_data = {
+                    'firstName': data['firstName'],
+                    'lastName': data['lastName'],
+                    'age': age,
+                    'location': data.get('location', ''),
+                    'interests': data.get('interests', ''),
+                    'profileCompleted': data['profileCompleted'],
+                    'profileCreatedAt': data.get('profileCreatedAt', datetime.utcnow())
+                }
+                db.collection('User_collection').document(user_id).update(update_data)
+                print(f"Updated profile for user {user_id}")
+            else:
+                # Create new user document with profile data
+                user_data = {
+                    'firstName': data['firstName'],
+                    'lastName': data['lastName'],
+                    'age': age,
+                    'location': data.get('location', ''),
+                    'interests': data.get('interests', ''),
+                    'profileCompleted': data['profileCompleted'],
+                    'profileCreatedAt': data.get('profileCreatedAt', datetime.utcnow()),
+                    'createdAt': datetime.utcnow()
+                }
+                db.collection('User_collection').document(user_id).set(user_data)
+                print(f"Created new user document for {user_id} with profile data")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Profile updated successfully'
+            })
+            
+        except Exception as e:
+            print(f"Error updating profile: {e}")
+            return jsonify({'error': str(e)}), 500
+
+
+@app.route('/quests/generate', methods=['POST'])
+def generate_new_quests():
+    """Generate new quests using Gemini API when database is running low"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        data = request.get_json() or {}
+        min_quests = data.get('min_quests', 5)  # Minimum number of quests to maintain
+        quests_to_generate = data.get('quests_to_generate', 10)  # Number of new quests to generate
+        
+        # Check current quest count
+        current_quests = db.collection('Quests').where('is_active', '==', True).stream()
+        current_count = len(list(current_quests))
+        
+        print(f"Current active quests: {current_count}")
+        
+        # Only generate if we're below the minimum threshold
+        if current_count >= min_quests:
+            return jsonify({
+                'success': True,
+                'message': f'Sufficient quests available ({current_count}). No generation needed.',
+                'current_count': current_count,
+                'generated_count': 0
+            })
+        
+        # Generate new quests using Gemini API
+        generated_quests = generate_quests_with_gemini(quests_to_generate)
+        
+        if not generated_quests:
+            return jsonify({'error': 'Failed to generate quests'}), 500
+        
+        # Insert generated quests into database
+        inserted_count = 0
+        for quest_data in generated_quests:
+            try:
+                quest_ref = db.collection('Quests').document()
+                quest_data['id'] = quest_ref.id
+                quest_data['created_at'] = datetime.utcnow()
+                quest_data['updated_at'] = datetime.utcnow()
+                quest_ref.set(quest_data)
+                inserted_count += 1
+                print(f"Inserted quest: {quest_data['title']}")
+            except Exception as e:
+                print(f"Error inserting quest: {e}")
+                continue
+        
+        return jsonify({
+            'success': True,
+            'message': f'Generated {inserted_count} new quests',
+            'current_count': current_count + inserted_count,
+            'generated_count': inserted_count,
+            'quests': generated_quests[:5]  # Return first 5 for preview
+        })
+        
+    except Exception as e:
+        print(f"Error generating quests: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def generate_quests_with_gemini(count=10):
+    """Generate quest content using Gemini API"""
+    try:
+        # Quest categories and their characteristics
+        categories = [
+            {
+                'name': 'scanning',
+                'icon': 'camera-alt',
+                'description': 'Camera-based item identification quests',
+                'types': ['scan', 'identify', 'categorize']
+            },
+            {
+                'name': 'community',
+                'icon': 'people',
+                'description': 'Social sharing and engagement quests',
+                'types': ['share', 'post', 'comment', 'like']
+            },
+            {
+                'name': 'recycling',
+                'icon': 'recycling',
+                'description': 'Physical recycling activities',
+                'types': ['recycle', 'collect', 'sort', 'dispose']
+            },
+            {
+                'name': 'upcycling',
+                'icon': 'build',
+                'description': 'Creative waste transformation',
+                'types': ['transform', 'create', 'craft', 'repurpose']
+            },
+            {
+                'name': 'profile',
+                'icon': 'person',
+                'description': 'Account setup and profile completion',
+                'types': ['complete', 'update', 'verify']
+            }
+        ]
+        
+        # Generate quests for each category
+        generated_quests = []
+        
+        for i in range(count):
+            category = random.choice(categories)
+            quest_type = random.choice(category['types'])
+            
+            # Create prompt for Gemini
+            prompt = f"""
+            Generate a creative and engaging quest for a waste-to-worth mobile app. 
+            
+            Category: {category['name']}
+            Type: {quest_type}
+            Icon: {category['icon']}
+            
+            Create a quest that:
+            1. Is environmentally focused and educational
+            2. Encourages sustainable behavior
+            3. Is achievable but challenging
+            4. Has clear, measurable objectives
+            5. Is engaging and fun
+            
+            Return ONLY a JSON object with this exact structure:
+            {{
+                "title": "Creative quest title (max 50 characters)",
+                "description": "Detailed quest description (max 200 characters)",
+                "points": [25, 50, 100, 150, 200, 300],
+                "type": "{quest_type}",
+                "category": "{category['name']}",
+                "target_count": [1, 3, 5, 10, 15, 20, 25, 30],
+                "icon": "{category['icon']}",
+                "difficulty_level": ["easy", "medium", "hard"],
+                "is_active": true,
+                "is_repeatable": [true, false]
+            }}
+            
+            Make it unique and different from typical quests. Focus on environmental impact and user engagement.
+            """
+            
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[prompt]
+                )
+                
+                # Parse the response
+                quest_data = _json.loads(response.text.strip())
+                
+                # Validate and clean the data
+                quest_data = validate_quest_data(quest_data, category)
+                generated_quests.append(quest_data)
+                
+            except Exception as e:
+                print(f"Error generating quest with Gemini: {e}")
+                # Fallback to predefined quest if Gemini fails
+                fallback_quest = create_fallback_quest(category, quest_type)
+                generated_quests.append(fallback_quest)
+        
+        return generated_quests
+        
+    except Exception as e:
+        print(f"Error in generate_quests_with_gemini: {e}")
+        return []
+
+
+def validate_quest_data(quest_data, category):
+    """Validate and clean quest data from Gemini"""
+    try:
+        # Ensure required fields exist
+        required_fields = ['title', 'description', 'points', 'type', 'category', 'target_count', 'icon', 'difficulty_level']
+        
+        for field in required_fields:
+            if field not in quest_data:
+                quest_data[field] = get_default_value(field, category)
+        
+        # Validate and clean specific fields
+        quest_data['title'] = str(quest_data['title'])[:50]  # Limit title length
+        quest_data['description'] = str(quest_data['description'])[:200]  # Limit description length
+        
+        # Ensure points is a valid number
+        try:
+            quest_data['points'] = int(quest_data['points'])
+            if quest_data['points'] < 25:
+                quest_data['points'] = 25
+            elif quest_data['points'] > 300:
+                quest_data['points'] = 300
+        except (ValueError, TypeError):
+            quest_data['points'] = random.choice([25, 50, 100, 150, 200, 300])
+        
+        # Ensure target_count is valid
+        try:
+            quest_data['target_count'] = int(quest_data['target_count'])
+            if quest_data['target_count'] < 1:
+                quest_data['target_count'] = 1
+            elif quest_data['target_count'] > 50:
+                quest_data['target_count'] = 50
+        except (ValueError, TypeError):
+            quest_data['target_count'] = random.choice([1, 3, 5, 10, 15, 20])
+        
+        # Ensure difficulty_level is valid
+        if quest_data['difficulty_level'] not in ['easy', 'medium', 'hard']:
+            quest_data['difficulty_level'] = random.choice(['easy', 'medium', 'hard'])
+        
+        # Ensure boolean fields
+        quest_data['is_active'] = bool(quest_data.get('is_active', True))
+        quest_data['is_repeatable'] = bool(quest_data.get('is_repeatable', False))
+        
+        return quest_data
+        
+    except Exception as e:
+        print(f"Error validating quest data: {e}")
+        return create_fallback_quest(category, 'general')
+
+
+def get_default_value(field, category):
+    """Get default values for quest fields"""
+    defaults = {
+        'title': f"New {category['name'].title()} Quest",
+        'description': f"Complete this {category['name']} quest to earn points and help the environment.",
+        'points': random.choice([25, 50, 100, 150, 200, 300]),
+        'type': 'general',
+        'category': category['name'],
+        'target_count': random.choice([1, 3, 5, 10, 15, 20]),
+        'icon': category['icon'],
+        'difficulty_level': random.choice(['easy', 'medium', 'hard']),
+        'is_active': True,
+        'is_repeatable': False
+    }
+    return defaults.get(field, '')
+
+
+def create_fallback_quest(category, quest_type):
+    """Create a fallback quest if Gemini generation fails"""
+    fallback_templates = {
+        'scan': {
+            'title': f"Scan {random.choice([5, 10, 15, 20])} {category['name']} Items",
+            'description': f"Use the camera to scan and identify {random.choice([5, 10, 15, 20])} different {category['name']} items.",
+            'points': random.choice([50, 100, 150]),
+            'target_count': random.choice([5, 10, 15, 20])
+        },
+        'community': {
+            'title': f"Share {random.choice([3, 5, 7])} Community Posts",
+            'description': f"Post helpful {category['name']} tips or projects in the community.",
+            'points': random.choice([75, 150, 225]),
+            'target_count': random.choice([3, 5, 7])
+        },
+        'recycle': {
+            'title': f"Recycle {random.choice([10, 20, 30])} {category['name'].title()} Items",
+            'description': f"Collect and properly recycle {random.choice([10, 20, 30])} {category['name']} items.",
+            'points': random.choice([100, 200, 300]),
+            'target_count': random.choice([10, 20, 30])
+        },
+        'upcycle': {
+            'title': f"Upcycle {random.choice([2, 3, 5])} {category['name'].title()} Items",
+            'description': f"Transform {random.choice([2, 3, 5])} waste items into useful household items.",
+            'points': random.choice([150, 250, 350]),
+            'target_count': random.choice([2, 3, 5])
+        },
+        'profile': {
+            'title': f"Complete Your {category['name'].title()} Profile",
+            'description': f"Fill out your complete {category['name']} profile information.",
+            'points': 50,
+            'target_count': 1
+        }
+    }
+    
+    template = fallback_templates.get(quest_type, fallback_templates['scan'])
+    
+    return {
+        'title': template['title'],
+        'description': template['description'],
+        'points': template['points'],
+        'type': quest_type,
+        'category': category['name'],
+        'target_count': template['target_count'],
+        'icon': category['icon'],
+        'difficulty_level': random.choice(['easy', 'medium', 'hard']),
+        'is_active': True,
+        'is_repeatable': random.choice([True, False])
+    }
+
+
+@app.route('/quests', methods=['GET'])
+def get_quests():
+    """Get all active quests from the database"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get all active quests
+        quests_ref = db.collection('Quests').where('is_active', '==', True).stream()
+        quests = []
+        
+        for quest_doc in quests_ref:
+            quest_data = quest_doc.to_dict()
+            quest_data['id'] = quest_doc.id
+            quests.append(quest_data)
+        
+        return jsonify({
+            'success': True,
+            'quests': quests,
+            'count': len(quests)
+        })
+        
+    except Exception as e:
+        print(f"Error fetching quests: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>/quests/progress', methods=['GET'])
+def get_user_quest_progress(user_id):
+    """Get user's quest progress"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user's quest progress
+        progress_ref = db.collection('User_Quest_Progress').where('user_id', '==', user_id).stream()
+        progress_data = []
+        
+        for progress_doc in progress_ref:
+            progress = progress_doc.to_dict()
+            progress['id'] = progress_doc.id
+            progress_data.append(progress)
+        
+        return jsonify({
+            'success': True,
+            'progress': progress_data,
+            'count': len(progress_data)
+        })
+        
+    except Exception as e:
+        print(f"Error fetching user quest progress: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>/quests/progress', methods=['POST'])
+def update_user_quest_progress(user_id):
+    """Update user's quest progress"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        data = request.get_json()
+        quest_id = data.get('quest_id')
+        progress_increment = data.get('increment', 1)
+        
+        if not quest_id:
+            return jsonify({'error': 'Missing quest_id'}), 400
+        
+        # Check if user already has progress for this quest
+        progress_query = db.collection('User_Quest_Progress').where('user_id', '==', user_id).where('quest_id', '==', quest_id).stream()
+        progress_docs = list(progress_query)
+        
+        if progress_docs:
+            # Update existing progress
+            progress_doc = progress_docs[0]
+            current_progress = progress_doc.to_dict().get('current_progress', 0)
+            new_progress = current_progress + progress_increment
+            
+            # Get quest details to check if completed
+            quest_doc = db.collection('Quests').document(quest_id).get()
+            if quest_doc.exists:
+                quest_data = quest_doc.to_dict()
+                target_count = quest_data.get('target_count', 1)
+                points = quest_data.get('points', 0)
+                
+                is_completed = new_progress >= target_count
+                points_earned = points if is_completed and current_progress < target_count else 0
+                
+                # Update progress
+                progress_doc.reference.update({
+                    'current_progress': new_progress,
+                    'is_completed': is_completed,
+                    'completed_at': datetime.utcnow() if is_completed else None,
+                    'points_earned': points_earned,
+                    'updated_at': datetime.utcnow()
+                })
+                
+                return jsonify({
+                    'success': True,
+                    'progress': new_progress,
+                    'is_completed': is_completed,
+                    'points_earned': points_earned,
+                    'message': 'Quest completed!' if is_completed else 'Progress updated'
+                })
+            else:
+                return jsonify({'error': 'Quest not found'}), 404
+        else:
+            # Create new progress entry
+            quest_doc = db.collection('Quests').document(quest_id).get()
+            if quest_doc.exists:
+                quest_data = quest_doc.to_dict()
+                target_count = quest_data.get('target_count', 1)
+                points = quest_data.get('points', 0)
+                
+                new_progress = progress_increment
+                is_completed = new_progress >= target_count
+                points_earned = points if is_completed else 0
+                
+                # Create new progress document
+                progress_ref = db.collection('User_Quest_Progress').document()
+                progress_data = {
+                    'user_id': user_id,
+                    'quest_id': quest_id,
+                    'current_progress': new_progress,
+                    'is_completed': is_completed,
+                    'completed_at': datetime.utcnow() if is_completed else None,
+                    'points_earned': points_earned,
+                    'created_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow()
+                }
+                progress_ref.set(progress_data)
+                
+                return jsonify({
+                    'success': True,
+                    'progress': new_progress,
+                    'is_completed': is_completed,
+                    'points_earned': points_earned,
+                    'message': 'Quest completed!' if is_completed else 'Progress updated'
+                })
+            else:
+                return jsonify({'error': 'Quest not found'}), 404
+        
+    except Exception as e:
+        print(f"Error updating quest progress: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>/quests/stats', methods=['GET'])
+def get_user_quest_stats(user_id):
+    """Get user's quest statistics"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user's quest progress
+        progress_ref = db.collection('User_Quest_Progress').where('user_id', '==', user_id).stream()
+        progress_data = []
+        
+        for progress_doc in progress_ref:
+            progress = progress_doc.to_dict()
+            progress_data.append(progress)
+        
+        # Calculate stats
+        completed_quests = [p for p in progress_data if p.get('is_completed', False)]
+        total_points = sum(p.get('points_earned', 0) for p in completed_quests)
+        total_quests = len(progress_data)
+        
+        # Get level based on points
+        if total_points < 100:
+            level = 'Eco Beginner'
+        elif total_points < 300:
+            level = 'Eco Explorer'
+        elif total_points < 600:
+            level = 'Eco Warrior'
+        elif total_points < 1000:
+            level = 'Eco Champion'
+        elif total_points < 1500:
+            level = 'Eco Master'
+        else:
+            level = 'Eco Legend'
+        
+        level_progress = (total_points % 500) / 500 * 100
+        
+        return jsonify({
+            'success': True,
+            'stats': {
+                'total_points': total_points,
+                'level': level,
+                'level_progress': level_progress,
+                'completed_quests': len(completed_quests),
+                'total_quests': total_quests
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error fetching user quest stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/quests/check-and-generate', methods=['GET'])
+def check_and_generate_quests():
+    """Automatically check quest count and generate if needed"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Check current quest count
+        current_quests = db.collection('Quests').where('is_active', '==', True).stream()
+        current_count = len(list(current_quests))
+        
+        min_quests = 5  # Minimum threshold
+        quests_to_generate = 10  # Number to generate if below threshold
+        
+        if current_count < min_quests:
+            # Generate new quests
+            generated_quests = generate_quests_with_gemini(quests_to_generate)
+            
+            if generated_quests:
+                # Insert generated quests
+                inserted_count = 0
+                for quest_data in generated_quests:
+                    try:
+                        quest_ref = db.collection('Quests').document()
+                        quest_data['id'] = quest_ref.id
+                        quest_data['created_at'] = datetime.utcnow()
+                        quest_data['updated_at'] = datetime.utcnow()
+                        quest_ref.set(quest_data)
+                        inserted_count += 1
+                    except Exception as e:
+                        print(f"Error inserting quest: {e}")
+                        continue
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Generated {inserted_count} new quests automatically',
+                    'previous_count': current_count,
+                    'new_count': current_count + inserted_count,
+                    'generated_count': inserted_count
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Failed to generate new quests',
+                    'current_count': current_count
+                })
+        else:
+            return jsonify({
+                'success': True,
+                'message': f'Sufficient quests available ({current_count})',
+                'current_count': current_count,
+                'generated_count': 0
+            })
+            
+    except Exception as e:
+        print(f"Error in check_and_generate_quests: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

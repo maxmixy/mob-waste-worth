@@ -9,7 +9,8 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { saveUserId } from '@/lib/user';
+import { saveUserId, updateEULAAcceptance } from '@/lib/user';
+import EULA from '@/components/EULA';
 
 // 🔥 Firebase config
 const firebaseConfig = {
@@ -40,6 +41,8 @@ export default function SignUpPage() {
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [confirmError, setConfirmError] = useState('');
+  const [showEULA, setShowEULA] = useState(false);
+  const [pendingUserData, setPendingUserData] = useState<{email: string, password: string} | null>(null);
 
   const handleSignUp = async () => {
     setLoading(true);
@@ -69,16 +72,31 @@ export default function SignUpPage() {
       return;
     }
 
+    // Store user data and show EULA
+    setPendingUserData({ email, password });
+    setShowEULA(true);
+    setLoading(false);
+  };
+
+  const handleEULAAccept = async () => {
+    if (!pendingUserData) return;
+
+    setLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, pendingUserData.email, pendingUserData.password);
 
       if (userCredential?.user?.uid) {
         await saveUserId(userCredential.user.uid);
+
+        // Update EULA acceptance status
+        await updateEULAAcceptance(userCredential.user.uid, true);
 
         try {
           await setDoc(doc(db, 'User_Collection', userCredential.user.uid), {
             email: userCredential.user.email || null,
             createdAt: serverTimestamp(),
+            eulaAccepted: true,
+            eulaAcceptedAt: serverTimestamp(),
           });
         } catch (e) {
           console.warn('⚠️ Failed to create user document:', e);
@@ -92,10 +110,29 @@ export default function SignUpPage() {
       else if (code === 'auth/invalid-email') setEmailError('Invalid email format.');
       else if (code === 'auth/weak-password') setPasswordError('Password is too weak.');
       else setPasswordError('Sign up failed. Please try again.');
+      
+      // Reset EULA state on error
+      setShowEULA(false);
+      setPendingUserData(null);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleEULADecline = () => {
+    // Reset state and return to signup form
+    setShowEULA(false);
+    setPendingUserData(null);
+  };
+
+  // Show EULA if user has completed signup form
+  if (showEULA) {
+    return (
+      <ThemedView style={{ flex: 1, backgroundColor: Colors[colorScheme].background }}>
+        <EULA onAccept={handleEULAAccept} onDecline={handleEULADecline} />
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>

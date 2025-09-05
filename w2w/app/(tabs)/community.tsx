@@ -7,12 +7,13 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { getUserId } from '@/lib/user';
+import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ScrollView as RNScrollView } from 'react-native';
 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
+import SettingsSidebar from '@/components/SettingsSidebar';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -49,6 +50,7 @@ export default function CommunityScreen() {
   const [commentText, setCommentText] = useState('');
   const [postText, setPostText] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
   const [likingPostId, setLikingPostId] = useState<string | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -73,10 +75,24 @@ export default function CommunityScreen() {
     }
   };
 
+  const loadUserProfile = async (uid: string) => {
+    try {
+      const profileInfo = await checkProfileCompletion(uid);
+      if (profileInfo.profileCompleted && profileInfo.profileData) {
+        setUserProfile(profileInfo.profileData);
+      }
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       const uid = await getUserId();
       setUserId(uid);
+      if (uid) {
+        await loadUserProfile(uid);
+      }
       loadPosts();
       
       // Camera permissions are handled by useCameraPermissions hook
@@ -346,6 +362,10 @@ export default function CommunityScreen() {
 
   return (
     <>
+      <SettingsSidebar 
+        visible={sidebarVisible} 
+        onClose={() => setSidebarVisible(false)} 
+      />
       <RNScrollView
         style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
         contentContainerStyle={{ flexGrow: 1 }}
@@ -374,7 +394,9 @@ export default function CommunityScreen() {
                  resizeMode="cover"
                />
              </View>
-             <ThemedText style={styles.shareProfileName}>{userId || 'Guest'}</ThemedText>
+             <ThemedText style={styles.shareProfileName}>
+               {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : (userId || 'Guest')}
+             </ThemedText>
              <TextInput
                style={styles.shareInput}
                placeholder="What would you like to share?"
@@ -462,7 +484,11 @@ export default function CommunityScreen() {
                   style={styles.userAvatar}
                 />
                 <View style={{ flex: 1 }}>
-                  <ThemedText style={styles.postUser}>{post.user_id}</ThemedText>
+                  <ThemedText style={styles.postUser}>
+                    {post.user_id === userId && userProfile 
+                      ? `${userProfile.firstName} ${userProfile.lastName}` 
+                      : post.user_id}
+                  </ThemedText>
                   {post.created_at && (
                     <ThemedText style={styles.postDate}>
                       {new Date(post.created_at).toLocaleDateString()}
@@ -553,27 +579,6 @@ export default function CommunityScreen() {
         )}
       </RNScrollView>
 
-      {/* Sidebar */}
-      <Modal
-        visible={sidebarVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setSidebarVisible(false)}
-      >
-        <TouchableOpacity style={styles.sidebarOverlay} activeOpacity={1} onPress={() => setSidebarVisible(false)} />
-        <View style={styles.sidebarContainer}>
-          <View style={styles.sidebarProfile}>
-            <View style={styles.userImageContainer}>
-              <Image
-                source={require('@/assets/images/partial-react-logo.png')}
-                style={styles.userImage}
-              />
-            </View>
-            <ThemedText style={styles.userName}>{userId || 'Guest'}</ThemedText>
-            <ThemedText style={styles.scanCount}>{posts.length} posts</ThemedText>
-          </View>
-        </View>
-      </Modal>
 
       {/* Camera Modal */}
       <Modal

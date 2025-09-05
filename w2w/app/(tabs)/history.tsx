@@ -1,15 +1,15 @@
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId } from '@/lib/user';
-import { ScrollView as RNScrollView } from 'react-native';
-
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import SettingsSidebar from '@/components/SettingsSidebar';
+import { ScrollView as RNScrollView } from 'react-native';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -144,6 +144,10 @@ export default function HistoryScreen() {
 
   return (
     <>
+      <SettingsSidebar 
+        visible={sidebarVisible} 
+        onClose={() => setSidebarVisible(false)} 
+      />
       <RNScrollView
         style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
         contentContainerStyle={{ flexGrow: 1 }}
@@ -216,32 +220,6 @@ export default function HistoryScreen() {
           </View>
         )}
       </RNScrollView>
-      {/* Sidebar Modal */}
-      <Modal
-        visible={sidebarVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setSidebarVisible(false)}
-      >
-        <TouchableOpacity style={styles.sidebarOverlay} activeOpacity={1} onPress={() => setSidebarVisible(false)} />
-        <View style={styles.sidebarContainer}>
-          {/* User Profile at the top of sidebar */}
-          <View style={styles.sidebarProfile}>
-            <View style={styles.userImageContainer}>
-              <Image
-                source={require('@/assets/images/partial-react-logo.png')}
-                style={styles.userImage}
-                resizeMode="cover"
-              />
-            </View>
-            <ThemedText style={styles.userName}>User</ThemedText>
-            <ThemedText style={styles.scanCount}>
-              {scanHistory.length} materials scanned
-            </ThemedText>
-          </View>
-          {/* Add more sidebar content here */}
-        </View>
-      </Modal>
     </>
   );
 }

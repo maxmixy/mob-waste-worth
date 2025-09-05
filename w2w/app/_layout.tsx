@@ -22,6 +22,9 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="(login)/index" options={{ headerShown: false }} />
         <Stack.Screen name="(login)/signup" options={{ headerShown: false }} />
+        <Stack.Screen name="(login)/eula" options={{ headerShown: false }} />
+        <Stack.Screen name="(login)/profile" options={{ headerShown: false }} />
+        <Stack.Screen name="(login)/profile-settings" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
       </Stack>

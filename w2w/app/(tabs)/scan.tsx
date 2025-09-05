@@ -3,7 +3,7 @@ import { BlurView } from 'expo-blur';
 import { StyleSheet } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
-import { Platform, Alert } from 'react-native';
+import { Platform, Alert, Pressable } from 'react-native';
 import { ActivityIndicator } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { router } from 'expo-router';
@@ -12,6 +12,10 @@ import { HelloWave } from '@/components/HelloWave';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
+import SettingsSidebar from '@/components/SettingsSidebar';
 
 // Update this URL to the address where your backend is reachable from the device/emulator.
 // For local Python backend (this repo) the endpoint is POST /upload on port 5000.
@@ -23,11 +27,13 @@ import { ThemedView } from '@/components/ThemedView';
 const UPLOAD_URL = 'http://127.0.0.1:5000/upload';
 
 export default function HomeScreen() {
+    const colorScheme = useColorScheme() ?? 'light';
     const isFocused = useIsFocused();
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const cameraRef = useRef<CameraView>(null);
     const [isCameraReady, setIsCameraReady] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [sidebarVisible, setSidebarVisible] = useState(false);
     
     useEffect(() => {
         if (!cameraPermission?.granted) {
@@ -136,6 +142,10 @@ export default function HomeScreen() {
 
     return (
         <ThemedView style={{ flex: 1 }}>
+            <SettingsSidebar 
+                visible={sidebarVisible} 
+                onClose={() => setSidebarVisible(false)}
+            />
             {isFocused && (
                 <CameraView
                     ref={cameraRef}
@@ -144,6 +154,20 @@ export default function HomeScreen() {
                 />
             )}
             <ThemedView style={styles.topWindow} pointerEvents="none" />
+            {/* Settings Button */}
+            <ThemedView style={styles.settingsButtonContainer} pointerEvents="auto">
+                <Pressable
+                    style={styles.settingsButton}
+                    onPress={() => setSidebarVisible(true)}
+                    accessibilityLabel="Settings"
+                >
+                    <MaterialIcons 
+                        name="settings" 
+                        size={24} 
+                        color={Colors[colorScheme].icon} 
+                    />
+                </Pressable>
+            </ThemedView>
             <ThemedView style={styles.bottomWindow} pointerEvents="none">
                 <ThemedText type="title" style={styles.centeredText}>Scan Your Waste</ThemedText>
                 <ThemedText type="subtitle" style={styles.centeredText}>Hold your waste item steady in front of the camera. <br/>
@@ -166,6 +190,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  settingsButtonContainer: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+  },
+  settingsButton: {
+    padding: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
   },
   stepContainer: {
     gap: 8,
