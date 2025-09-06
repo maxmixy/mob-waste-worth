@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, ScrollView, Image, TextInput, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { getUserId } from '@/lib/user';
@@ -35,6 +35,7 @@ interface DetailPageData {
 
 export default function DetailScreen() {
     const params = useLocalSearchParams();
+    const router = useRouter();
     const [pageData, setPageData] = useState<DetailPageData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -352,6 +353,11 @@ export default function DetailScreen() {
         }
     };
 
+    // Navigate to project detail page
+    const navigateToProjectDetail = (projectId: string) => {
+        router.push(`/pages/project-detail?projectId=${projectId}`);
+    };
+
     useEffect(() => {
         const loadPageData = async () => {
             if (params.scanData) {
@@ -456,7 +462,12 @@ export default function DetailScreen() {
                     </ThemedView>
                 ) : pageData.recyclingProjects.length > 0 ? (
                     pageData.recyclingProjects.map((project, index) => (
-                        <ThemedView key={project.id} style={styles.projectCard}>
+                        <TouchableOpacity 
+                            key={project.id} 
+                            style={styles.projectCard}
+                            onPress={() => navigateToProjectDetail(project.id)}
+                            activeOpacity={0.7}
+                        >
                             <ThemedView style={styles.projectImage}>
                                 {project.project_image ? (
                                     <Image 
@@ -479,8 +490,11 @@ export default function DetailScreen() {
                                 <ThemedText style={styles.stepsText}>
                                     Steps: {project.steps.length} steps
                                 </ThemedText>
+                                <ThemedText style={styles.tapToViewText}>
+                                    Tap to view full details →
+                                </ThemedText>
                             </ThemedView>
-                        </ThemedView>
+                        </TouchableOpacity>
                     ))
                 ) : (
                     <ThemedText style={styles.noProjectsText}>No recycling projects available for this material.</ThemedText>
@@ -646,6 +660,12 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#888',
         fontStyle: 'italic',
+    },
+    tapToViewText: {
+        fontSize: 12,
+        color: '#007AFF',
+        marginTop: 8,
+        fontWeight: '500',
     },
     noProjectsText: {
         textAlign: 'center',
