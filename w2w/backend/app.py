@@ -130,7 +130,7 @@ def upload():
     try:
         text_prompt = f"""You are a recycling expert. Identify the recyclable object in the image. Also identify any relevant traits about the item: 
         Color, Shape/form, Transparency, Surface Condition, Texture, Size, Others. Minimize traits to single words as much as possible. 
-        Return in this exact format: "{{"Name": "Material Name", "Traits": ["Trait1", "Trait2", "Trait3"]}}"."
+        Return in this exact format: "{{"Name": "Object Name", "Traits": ["Trait1", "Trait2", "Trait3"]}}"."
         """
         response = client.models.generate_content(
                     model="gemini-2.5-flash",
@@ -499,6 +499,519 @@ def get_recycling_project(project_id):
         
     except Exception as e:
         print(f"Error fetching recycling project: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/recycling/populate', methods=['POST'])
+def populate_recycling_table():
+    """Populate the Recycling table with sample data, optionally customized for specific material"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get material details from request if provided
+        data = request.get_json() or {}
+        material_name = data.get('material_name', '')
+        material_traits = data.get('material_traits', [])
+        scanned_material_id = data.get('scanned_material_id', '')
+        
+        print(f"Populating recycling table for material: '{material_name}' (ID: '{scanned_material_id}')")
+        print(f"Material traits: {material_traits}")
+        print(f"Request data: {data}")
+        
+        # Sample recycling projects data
+        sample_projects = [
+            {
+                'material_name': 'Plastic Bottles',
+                'project_image': '/images/plastic-bottle-planter.jpg',
+                'project_name': 'Plastic Bottle Planter',
+                'required_traits': ['Clean', 'Intact', 'Medium-sized'],
+                'steps': [
+                    'Clean the plastic bottle thoroughly',
+                    'Cut the top third of the bottle off',
+                    'Poke drainage holes in the bottom',
+                    'Add soil and plant your seeds',
+                    'Water regularly and watch it grow!'
+                ]
+            },
+            {
+                'material_name': 'Glass Jars',
+                'project_image': '/images/glass-jar-candles.jpg',
+                'project_name': 'Glass Jar Candles',
+                'required_traits': ['Clean', 'No cracks', 'Wide opening'],
+                'steps': [
+                    'Remove all labels and clean the jar',
+                    'Melt candle wax in a double boiler',
+                    'Add wick to the center of the jar',
+                    'Pour melted wax into the jar',
+                    'Let cool and trim the wick'
+                ]
+            },
+            {
+                'material_name': 'Cardboard Boxes',
+                'project_image': '/images/cardboard-organizer.jpg',
+                'project_name': 'Cardboard Storage Organizer',
+                'required_traits': ['Clean', 'Sturdy', 'Medium-sized'],
+                'steps': [
+                    'Cut cardboard into desired shapes',
+                    'Create compartments using dividers',
+                    'Cover with decorative paper or fabric',
+                    'Assemble using glue or tape',
+                    'Organize your items!'
+                ]
+            },
+            {
+                'material_name': 'Tin Cans',
+                'project_image': '/images/tin-can-pencil-holder.jpg',
+                'project_name': 'Tin Can Pencil Holder',
+                'required_traits': ['Clean', 'No sharp edges', 'Various sizes'],
+                'steps': [
+                    'Remove labels and clean thoroughly',
+                    'Sand any rough edges',
+                    'Paint or decorate as desired',
+                    'Let dry completely',
+                    'Organize your writing supplies'
+                ]
+            },
+            {
+                'material_name': 'Old T-Shirts',
+                'project_image': '/images/t-shirt-tote-bag.jpg',
+                'project_name': 'T-Shirt Tote Bag',
+                'required_traits': ['Clean', 'No holes', 'Cotton material'],
+                'steps': [
+                    'Cut off sleeves and neckline',
+                    'Cut strips along the bottom',
+                    'Tie strips together to close bottom',
+                    'Add handles by cutting armholes',
+                    'Use as a reusable shopping bag'
+                ]
+            },
+            {
+                'material_name': 'Wine Corks',
+                'project_image': '/images/cork-board.jpg',
+                'project_name': 'Cork Bulletin Board',
+                'required_traits': ['Clean', 'Intact', 'Various sizes'],
+                'steps': [
+                    'Collect enough corks for your board size',
+                    'Cut some corks in half lengthwise',
+                    'Arrange corks in desired pattern',
+                    'Glue corks to a backing board',
+                    'Hang and use for notes and photos'
+                ]
+            }
+        ]
+        
+        # Check existing projects to avoid duplicates
+        existing_projects = db.collection('Recycling').stream()
+        existing_project_names = set()
+        existing_count = 0
+        for doc in existing_projects:
+            existing_count += 1
+            project_data = doc.to_dict()
+            if 'project_name' in project_data:
+                existing_project_names.add(project_data['project_name'])
+        
+        print(f"Found {existing_count} existing projects in Recycling collection")
+        print(f"Existing project names: {list(existing_project_names)}")
+        
+        # Add only new projects that don't already exist
+        added_projects = []
+        for project in sample_projects:
+            print(f"Checking project: {project['project_name']}")
+            if project['project_name'] not in existing_project_names:
+                print(f"Adding new project: {project['project_name']}")
+                # Generate a unique document ID
+                doc_ref = db.collection('Recycling').document()
+                doc_ref.set(project)
+                added_projects.append({
+                    'id': doc_ref.id,
+                    **project
+                })
+                existing_project_names.add(project['project_name'])  # Add to set to prevent duplicates in same batch
+            else:
+                print(f"Project already exists, skipping: {project['project_name']}")
+        
+        # If we have material details and no relevant projects were found, create a custom project
+        if material_name and scanned_material_id:
+            material_lower = material_name.lower()
+            relevant_project_found = False
+            
+            # Check if any of the added projects are relevant to the scanned material
+            for project in added_projects:
+                project_material = project['material_name'].lower()
+                if (material_lower in project_material or 
+                    project_material in material_lower or
+                    any(trait.lower() in project_material for trait in material_traits)):
+                    relevant_project_found = True
+                    break
+            
+            # If no relevant project found, create a custom one using Gemini
+            if not relevant_project_found:
+                print(f"Creating custom Gemini-generated project for material: {material_name}")
+                custom_project = create_custom_recycling_project(material_name, material_traits, scanned_material_id)
+                if custom_project:
+                    doc_ref = db.collection('Recycling').document()
+                    doc_ref.set(custom_project)
+                    added_projects.append({
+                        'id': doc_ref.id,
+                        **custom_project
+                    })
+                    print(f"Added Gemini-generated custom project: {custom_project['project_name']}")
+                else:
+                    print(f"Failed to generate custom project for {material_name}")
+        
+        # If the table was completely empty and we have material details, generate additional projects
+        elif material_name and existing_count == 0 and added_projects:
+            print(f"Table was empty, generating additional Gemini projects for {material_name}")
+            # Generate 2-3 additional creative projects for variety
+            for i in range(2):
+                try:
+                    additional_project = create_custom_recycling_project(material_name, material_traits, f"{scanned_material_id}_extra_{i}")
+                    if additional_project:
+                        # Make the project name unique
+                        additional_project['project_name'] = f"{additional_project['project_name']} (Variation {i+1})"
+                        doc_ref = db.collection('Recycling').document()
+                        doc_ref.set(additional_project)
+                        added_projects.append({
+                            'id': doc_ref.id,
+                            **additional_project
+                        })
+                        print(f"Added additional Gemini project: {additional_project['project_name']}")
+                except Exception as e:
+                    print(f"Error generating additional project {i}: {e}")
+                    break
+        
+        print(f"Total projects added: {len(added_projects)}")
+        
+        return jsonify({
+            'message': f'Successfully added {len(added_projects)} recycling projects',
+            'projects': added_projects
+        }), 201
+        
+    except Exception as e:
+        print(f"Error populating recycling table: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def create_custom_recycling_project(material_name, material_traits, material_id):
+    """Create a custom recycling project for a specific material using Gemini API"""
+    try:
+        print(f"Creating custom project - material_name: '{material_name}', material_id: '{material_id}', traits: {material_traits}")
+        
+        # Get existing projects for this material to avoid redundancy
+        existing_projects = []
+        try:
+            if db is not None:
+                # Get all projects from the Recycling collection
+                projects_ref = db.collection('Recycling')
+                docs = projects_ref.stream()
+                
+                for doc in docs:
+                    project_data = doc.to_dict()
+                    project_material = project_data.get('material_name', '').lower()
+                    material_lower = material_name.lower()
+                    
+                    # Check if this project is relevant to the current material
+                    if (material_lower in project_material or 
+                        project_material in material_lower or
+                        any(trait.lower() in project_material for trait in material_traits)):
+                        existing_projects.append({
+                            'project_name': project_data.get('project_name', ''),
+                            'material_name': project_data.get('material_name', ''),
+                            'steps_count': len(project_data.get('steps', []))
+                        })
+        except Exception as e:
+            print(f"Error fetching existing projects: {e}")
+        
+        print(f"Found {len(existing_projects)} existing projects for material '{material_name}': {[p['project_name'] for p in existing_projects]}")
+        
+        # Create a detailed prompt for Gemini
+        traits_text = ", ".join(material_traits) if material_traits else "no specific traits"
+        
+        # Build existing projects text
+        existing_projects_text = ""
+        if existing_projects:
+            existing_projects_text = f"""
+        
+        EXISTING PROJECTS FOR THIS MATERIAL (avoid creating similar ones):
+        {chr(10).join([f"- {p['project_name']} ({p['material_name']}) - {p['steps_count']} steps" for p in existing_projects])}
+        
+        IMPORTANT: Create a completely different and unique project that is NOT similar to any of the above existing projects.
+        """
+        
+        prompt = f"""
+        You are a creative recycling expert. Generate a unique and practical upcycling project for this specific material:
+        
+        Material: {material_name}
+        Traits: {traits_text}{existing_projects_text}
+        
+        Create a creative, environmentally-friendly upcycling project that transforms this material into something useful and beautiful. 
+        The project should be:
+        1. Practical and achievable for beginners to intermediate crafters
+        2. Environmentally beneficial (reduces waste)
+        3. Creative and unique (not just basic recycling)
+        4. Safe to make
+        5. Results in something useful or decorative
+        6. COMPLETELY DIFFERENT from any existing projects listed above
+        
+        Return ONLY with this exact structure, do not include the json tag:
+        {{
+            "project_name": "Creative project name (max 50 characters)",
+            "required_traits": ["Clean", "Intact", "Additional relevant traits based on material"],
+            "steps": [
+                "Detailed step and instruction"
+            ]
+        }}
+        
+        Make the project name creative and descriptive. Include 3-5 required traits that are relevant to the material and project.
+        Provide detailed, actionable steps that someone can follow to complete the project.
+        Be specific about tools, materials, and techniques needed.
+        Use as many steps as needed.
+        Ensure this project is unique and different from existing ones.
+        """
+        
+        print(f"Generating custom project for {material_name} using Gemini API...")
+        
+        # Call Gemini API
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[prompt]
+        )
+        
+        # Parse the response
+        project_data = _json.loads(response.text.strip())
+        
+        # Validate and clean the data
+        project_name = str(project_data.get('project_name', f'{material_name} Upcycling Project'))[:50]
+        required_traits = project_data.get('required_traits', ['Clean', 'Intact'])
+        steps = project_data.get('steps', [])
+        
+        # Ensure we have valid data
+        if not isinstance(required_traits, list):
+            required_traits = ['Clean', 'Intact']
+        if not isinstance(steps, list) or len(steps) < 1:
+            steps = [
+                f"Clean the {material_name.lower()} thoroughly",
+                "Prepare materials and tools needed",
+                "Follow the upcycling design plan",
+                "Assemble and decorate as desired",
+                "Complete and enjoy your creation!"
+            ]
+        
+        # Ensure steps are strings and limit length for safety
+        steps = [str(step)[:200] for step in steps]  # Limit each step to 200 chars but keep all steps
+        
+        # Ensure required traits are reasonable
+        required_traits = [str(trait)[:30] for trait in required_traits[:5]]  # Limit traits
+        
+        custom_project = {
+            'material_name': material_name,
+            'project_image': f'/images/{material_name.lower().replace(" ", "-")}-project.jpg',
+            'project_name': project_name,
+            'required_traits': required_traits,
+            'steps': steps
+        }
+        
+        print(f"Final custom project: {custom_project}")
+        return custom_project
+        
+    except Exception as e:
+        print(f"Error creating custom project with Gemini: {e}")
+        # Fallback to a simple generic project
+        return create_fallback_custom_project(material_name, material_traits)
+
+def create_fallback_custom_project(material_name, material_traits):
+    """Create a simple fallback project if Gemini fails"""
+    try:
+        material_lower = material_name.lower()
+        
+        # Simple fallback based on material type
+        if 'plastic' in material_lower:
+            project_name = f"{material_name} Planter"
+            steps = [
+                f"Clean the {material_name.lower()} thoroughly",
+                "Cut or modify the shape as needed",
+                "Add drainage holes if necessary",
+                "Fill with soil and plant seeds",
+                "Water regularly and watch it grow!"
+            ]
+        elif 'glass' in material_lower:
+            project_name = f"{material_name} Candle Holder"
+            steps = [
+                f"Remove all labels from the {material_name.lower()}",
+                "Clean thoroughly with soap and water",
+                "Melt candle wax in a double boiler",
+                "Add wick to the center",
+                "Pour melted wax and let cool"
+            ]
+        else:
+            project_name = f"{material_name} Art Project"
+            steps = [
+                f"Clean the {material_name.lower()} thoroughly",
+                "Plan your design or decoration",
+                "Gather art supplies (paint, glue, etc.)",
+                "Create your unique art piece",
+                "Display your creation proudly"
+            ]
+        
+        return {
+            'material_name': material_name,
+            'project_image': f'/images/{material_name.lower().replace(" ", "-")}-project.jpg',
+            'project_name': project_name,
+            'required_traits': ['Clean', 'Intact'],
+            'steps': steps
+        }
+        
+    except Exception as e:
+        print(f"Error creating fallback project: {e}")
+        return None
+
+@app.route('/recycling/generate-custom', methods=['POST'])
+def generate_custom_project():
+    """Generate a single custom recycling project for a specific material"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        data = request.get_json() or {}
+        material_name = data.get('material_name', '')
+        material_traits = data.get('material_traits', [])
+        scanned_material_id = data.get('scanned_material_id', '')
+        
+        if not material_name:
+            return jsonify({'error': 'Material name is required'}), 400
+        
+        print(f"Generating custom project for material: '{material_name}' (ID: '{scanned_material_id}')")
+        
+        # Generate custom project using Gemini
+        custom_project = create_custom_recycling_project(material_name, material_traits, scanned_material_id)
+        
+        if custom_project:
+            # Save to database
+            doc_ref = db.collection('Recycling').document()
+            doc_ref.set(custom_project)
+            custom_project['id'] = doc_ref.id
+            
+            print(f"Generated and saved custom project: {custom_project['project_name']}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Custom project generated successfully',
+                'project': custom_project
+            }), 201
+        else:
+            return jsonify({'error': 'Failed to generate custom project'}), 500
+        
+    except Exception as e:
+        print(f"Error generating custom project: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/recycling/test-populate', methods=['POST'])
+def test_populate_recycling_table():
+    """Test endpoint to populate recycling table without duplicate checking"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Simple test project
+        test_project = {
+            'material_name': 'Test Material',
+            'project_image': '/images/test.jpg',
+            'project_name': 'Test Project',
+            'required_traits': ['Small', 'Clean'],
+            'steps': [
+                'Clean material',
+                'Cut material into shapes',
+                'Stick items together'
+            ]
+        }
+        
+        # Add test project directly
+        doc_ref = db.collection('Recycling').document()
+        doc_ref.set(test_project)
+        
+        return jsonify({
+            'message': 'Test project added successfully',
+            'project_id': doc_ref.id,
+            'project': test_project
+        }), 201
+        
+    except Exception as e:
+        print(f"Error in test populate: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/recycling/debug', methods=['GET'])
+def debug_recycling_collection():
+    """Debug endpoint to check the current state of the Recycling collection"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get all documents from Recycling collection
+        projects_ref = db.collection('Recycling')
+        docs = projects_ref.stream()
+        
+        projects = []
+        for doc in docs:
+            project_data = doc.to_dict()
+            project_data['id'] = doc.id
+            projects.append(project_data)
+        
+        return jsonify({
+            'total_projects': len(projects),
+            'projects': projects
+        })
+        
+    except Exception as e:
+        print(f"Error debugging recycling collection: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/recycling/clear', methods=['DELETE'])
+def clear_recycling_table():
+    """Clear all projects from the Recycling collection"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get all documents and delete them
+        docs = db.collection('Recycling').stream()
+        deleted_count = 0
+        
+        for doc in docs:
+            doc.reference.delete()
+            deleted_count += 1
+        
+        return jsonify({
+            'message': f'Successfully deleted {deleted_count} recycling projects',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        print(f"Error clearing recycling table: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/recycling', methods=['GET'])
+def get_all_recycling_projects():
+    """Get all recycling projects from the Recycling collection"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get all documents from Recycling collection
+        projects_ref = db.collection('Recycling')
+        docs = projects_ref.stream()
+        
+        projects = []
+        for doc in docs:
+            project_data = doc.to_dict()
+            project_data['id'] = doc.id
+            projects.append(project_data)
+        
+        return jsonify({
+            'projects': projects,
+            'count': len(projects)
+        })
+        
+    except Exception as e:
+        print(f"Error fetching all recycling projects: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/posts', methods=['GET', 'POST'])

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, Image, TextInput, ActivityIndicator } from 'react-native';
+import { StyleSheet, ScrollView, Image, TextInput, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -19,12 +19,11 @@ interface MaterialData {
 
 interface RecyclingProject {
     id: string;
-    title: string;
-    description: string;
-    imageUrl?: string;
-    difficulty: 'easy' | 'medium' | 'hard';
-    materialsNeeded: string[];
-    instructions?: string[];
+    material_name: string;
+    project_image: string;
+    project_name: string;
+    required_traits: string[];
+    steps: string[];
 }
 
 interface DetailPageData {
@@ -40,6 +39,9 @@ export default function DetailScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [scanData, setScanData] = useState<any>(null);
+    const [populatingProjects, setPopulatingProjects] = useState(false);
+    const [generatingCustomProject, setGeneratingCustomProject] = useState(false);
+    const [generateError, setGenerateError] = useState<string | null>(null);
 
     // Fetch material details and related data from backend
     const fetchMaterialDetails = async (materialId: string) => {
@@ -53,12 +55,193 @@ export default function DetailScreen() {
         }
     };
 
-    // Fetch recycling projects for the material
-    const fetchRecyclingProjects = async (materialId: string) => {
+    // Fetch recycling projects from the Recycling table
+    const fetchRecyclingProjects = async (materialId: string, materialName?: string) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/projects/${materialId}`);
+            const response = await fetch(`${API_BASE_URL}/recycling`);
             if (!response.ok) throw new Error('Failed to fetch recycling projects');
-            return await response.json();
+            const data = await response.json();
+            
+            // Check if data and projects array exist
+            if (!data || !Array.isArray(data.projects)) {
+                console.error('Invalid data structure received:', data);
+                return [];
+            }
+            
+            // Filter projects that match the material name or are related
+            if (!materialId || typeof materialId !== 'string') {
+                console.error('Invalid materialId:', materialId);
+                return [];
+            }
+            
+            // Use the actual material name if provided, otherwise fall back to materialId
+            const searchName = (materialName || materialId).toLowerCase();
+            let filteredProjects = data.projects.filter((project: RecyclingProject) => {
+                // Check if project and material_name exist
+                if (!project || !project.material_name || typeof project.material_name !== 'string') {
+                    console.warn('Invalid project or material_name:', project);
+                    return false;
+                }
+                
+                const projectMaterial = project.material_name.toLowerCase();
+                
+                // 1. Exact matches (highest priority)
+                if (projectMaterial === searchName) {
+                    return true;
+                }
+                
+                // 2. Direct substring matches (high priority)
+                if (projectMaterial.includes(searchName) || searchName.includes(projectMaterial)) {
+                    return true;
+                }
+                
+                // 3. Specific material type matches (medium priority)
+                const specificMatches = {
+                    'plastic bottle': ['plastic bottles', 'bottle'],
+                    'glass jar': ['glass jars', 'jar'],
+                    'cardboard box': ['cardboard boxes', 'box'],
+                    'tin can': ['tin cans', 'can'],
+                    't-shirt': ['old t-shirts', 'shirt'],
+                    'wine cork': ['wine corks', 'cork']
+                };
+                
+                for (const [scannedType, projectTypes] of Object.entries(specificMatches)) {
+                    if (searchName.includes(scannedType)) {
+                        for (const projectType of projectTypes) {
+                            if (projectMaterial.includes(projectType)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                // 4. Material category matches (lower priority, more restrictive)
+                const materialCategories = {
+                    'plastic': ['bottle', 'container', 'bag', 'cup'],
+                    'glass': ['jar', 'bottle', 'container', 'vase'],
+                    'cardboard': ['box', 'paper', 'container'],
+                    'metal': ['can', 'tin', 'aluminum', 'steel'],
+                    'fabric': ['shirt', 'cloth', 'fabric', 'textile'],
+                    'cork': ['cork', 'wine']
+                };
+                
+                // Only match if both the scanned material and project material contain the same category
+                for (const [category, keywords] of Object.entries(materialCategories)) {
+                    const scannedHasCategory = searchName.includes(category) || keywords.some(keyword => searchName.includes(keyword));
+                    const projectHasCategory = projectMaterial.includes(category) || keywords.some(keyword => projectMaterial.includes(keyword));
+                    
+                    if (scannedHasCategory && projectHasCategory) {
+                        return true;
+                    }
+                }
+                
+                return false;
+            });
+            
+            // If no projects found for this material, populate the table
+            if (filteredProjects.length === 0) {
+                console.log(`No recycling projects found for material: ${searchName}, populating table...`);
+                setPopulatingProjects(true);
+                try {
+                    // Get material details to pass to populate endpoint
+                    const materialDetails = pageData?.material || { Name: materialId, Traits: [] };
+                    
+                    const populateResponse = await fetch(`${API_BASE_URL}/recycling/populate`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            material_name: materialDetails.Name,
+                            material_traits: materialDetails.Traits || [],
+                            scanned_material_id: materialId
+                        })
+                    });
+                    
+                    if (populateResponse.ok) {
+                        console.log('Recycling table populated successfully');
+                        // Fetch projects again after populating
+                        const newResponse = await fetch(`${API_BASE_URL}/recycling`);
+                        if (newResponse.ok) {
+                            const newData = await newResponse.json();
+                            
+                            // Check if newData and projects array exist
+                            if (!newData || !Array.isArray(newData.projects)) {
+                                console.error('Invalid data structure after populate:', newData);
+                                return [];
+                            }
+                            
+                            filteredProjects = newData.projects.filter((project: RecyclingProject) => {
+                                // Check if project and material_name exist
+                                if (!project || !project.material_name || typeof project.material_name !== 'string') {
+                                    console.warn('Invalid project or material_name after populate:', project);
+                                    return false;
+                                }
+                                
+                                const projectMaterial = project.material_name.toLowerCase();
+                                
+                                // 1. Exact matches (highest priority)
+                                if (projectMaterial === searchName) {
+                                    return true;
+                                }
+                                
+                                // 2. Direct substring matches (high priority)
+                                if (projectMaterial.includes(searchName) || searchName.includes(projectMaterial)) {
+                                    return true;
+                                }
+                                
+                                // 3. Specific material type matches (medium priority)
+                                const specificMatches = {
+                                    'plastic bottle': ['plastic bottles', 'bottle'],
+                                    'glass jar': ['glass jars', 'jar'],
+                                    'cardboard box': ['cardboard boxes', 'box'],
+                                    'tin can': ['tin cans', 'can'],
+                                    't-shirt': ['old t-shirts', 'shirt'],
+                                    'wine cork': ['wine corks', 'cork']
+                                };
+                                
+                                for (const [scannedType, projectTypes] of Object.entries(specificMatches)) {
+                                    if (searchName.includes(scannedType)) {
+                                        for (const projectType of projectTypes) {
+                                            if (projectMaterial.includes(projectType)) {
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 4. Material category matches (lower priority, more restrictive)
+                                const materialCategories = {
+                                    'plastic': ['bottle', 'container', 'bag', 'cup'],
+                                    'glass': ['jar', 'bottle', 'container', 'vase'],
+                                    'cardboard': ['box', 'paper', 'container'],
+                                    'metal': ['can', 'tin', 'aluminum', 'steel'],
+                                    'fabric': ['shirt', 'cloth', 'fabric', 'textile'],
+                                    'cork': ['cork', 'wine']
+                                };
+                                
+                                // Only match if both the scanned material and project material contain the same category
+                                for (const [category, keywords] of Object.entries(materialCategories)) {
+                                    const scannedHasCategory = searchName.includes(category) || keywords.some(keyword => searchName.includes(keyword));
+                                    const projectHasCategory = projectMaterial.includes(category) || keywords.some(keyword => projectMaterial.includes(keyword));
+                                    
+                                    if (scannedHasCategory && projectHasCategory) {
+                                        return true;
+                                    }
+                                }
+                                
+                                return false;
+                            });
+                        }
+                    }
+                } catch (populateError) {
+                    console.error('Error populating recycling table:', populateError);
+                } finally {
+                    setPopulatingProjects(false);
+                }
+            }
+            
+            return filteredProjects;
         } catch (error) {
             console.error('Error fetching recycling projects:', error);
             return [];
@@ -125,6 +308,50 @@ export default function DetailScreen() {
         }
     };
 
+    // Generate a custom recycling project
+    const generateCustomProject = async () => {
+        if (!pageData?.material) return;
+        
+        setGeneratingCustomProject(true);
+        setGenerateError(null);
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/recycling/generate-custom`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    material_name: pageData.material.Name,
+                    material_traits: pageData.material.Traits || [],
+                    scanned_material_id: pageData.material.id
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('Custom project generated:', result.project);
+                
+                // Add the new project to the existing projects
+                if (result.project && pageData) {
+                    setPageData({
+                        ...pageData,
+                        recyclingProjects: [...pageData.recyclingProjects, result.project]
+                    });
+                }
+            } else {
+                const errorData = await response.json();
+                setGenerateError(errorData.error || 'Failed to generate custom project');
+                console.error('Failed to generate custom project:', errorData);
+            }
+        } catch (error) {
+            setGenerateError('Network error. Please try again.');
+            console.error('Error generating custom project:', error);
+        } finally {
+            setGeneratingCustomProject(false);
+        }
+    };
+
     useEffect(() => {
         const loadPageData = async () => {
             if (params.scanData) {
@@ -140,10 +367,12 @@ export default function DetailScreen() {
                         // Log the scan first
                         await logScan(materialId);
                         
-                        // Fetch all page data in parallel
-                        const [materialDetails, projects, disposalMethods, relatedMaterials] = await Promise.all([
-                            fetchMaterialDetails(materialId),
-                            fetchRecyclingProjects(materialId),
+                        // Fetch material details first to get the material name
+                        const materialDetails = await fetchMaterialDetails(materialId);
+                        
+                        // Fetch remaining data in parallel
+                        const [projects, disposalMethods, relatedMaterials] = await Promise.all([
+                            fetchRecyclingProjects(materialId, materialDetails?.Name),
                             fetchDisposalMethods(materialId),
                             fetchRelatedMaterials(materialId)
                         ]);
@@ -220,13 +449,18 @@ export default function DetailScreen() {
             <ThemedView style={styles.middleDivision}>
                 <ThemedText type="title" style={styles.sectionTitle}>Recycling Projects</ThemedText>
                 
-                {pageData.recyclingProjects.length > 0 ? (
+                {populatingProjects ? (
+                    <ThemedView style={styles.populatingContainer}>
+                        <ActivityIndicator size="small" color="#007AFF" />
+                        <ThemedText style={styles.populatingText}>Loading recycling projects...</ThemedText>
+                    </ThemedView>
+                ) : pageData.recyclingProjects.length > 0 ? (
                     pageData.recyclingProjects.map((project, index) => (
                         <ThemedView key={project.id} style={styles.projectCard}>
                             <ThemedView style={styles.projectImage}>
-                                {project.imageUrl ? (
+                                {project.project_image ? (
                                     <Image 
-                                        source={{ uri: project.imageUrl }} 
+                                        source={{ uri: project.project_image }} 
                                         style={styles.projectImageContent}
                                         resizeMode="cover"
                                     />
@@ -235,12 +469,15 @@ export default function DetailScreen() {
                                 )}
                             </ThemedView>
                             <ThemedView style={styles.projectInfo}>
-                                <ThemedText type="subtitle" style={styles.projectTitle}>{project.title}</ThemedText>
+                                <ThemedText type="subtitle" style={styles.projectTitle}>{project.project_name}</ThemedText>
                                 <ThemedText style={styles.projectDescription}>
-                                    {project.description}
+                                    Material: {project.material_name}
                                 </ThemedText>
-                                <ThemedText style={styles.difficultyText}>
-                                    Difficulty: {project.difficulty}
+                                <ThemedText style={styles.projectTraitsText}>
+                                    Required: {project.required_traits.join(', ')}
+                                </ThemedText>
+                                <ThemedText style={styles.stepsText}>
+                                    Steps: {project.steps.length} steps
                                 </ThemedText>
                             </ThemedView>
                         </ThemedView>
@@ -248,6 +485,33 @@ export default function DetailScreen() {
                 ) : (
                     <ThemedText style={styles.noProjectsText}>No recycling projects available for this material.</ThemedText>
                 )}
+
+                {/* Generate New Project Section */}
+                <ThemedView style={styles.generateProjectSection}>
+                    <ThemedText type="subtitle" style={styles.generateProjectTitle}>
+                        Not satisfied with these projects?
+                    </ThemedText>
+                    <ThemedText style={styles.generateProjectDescription}>
+                        Generate a new custom project tailored specifically for your material using AI!
+                    </ThemedText>
+                    {generateError && (
+                        <ThemedText style={styles.generateErrorText}>
+                            {generateError}
+                        </ThemedText>
+                    )}
+                    <ThemedView style={styles.generateButtonContainer}>
+                        {generatingCustomProject ? (
+                            <ThemedView style={styles.generateButton}>
+                                <ActivityIndicator size="small" color="#fff" />
+                                <ThemedText style={styles.generateButtonText}>Generating...</ThemedText>
+                            </ThemedView>
+                        ) : (
+                            <TouchableOpacity style={styles.generateButton} onPress={generateCustomProject}>
+                                <ThemedText style={styles.generateButtonText}>Generate New Project</ThemedText>
+                            </TouchableOpacity>
+                        )}
+                    </ThemedView>
+                </ThemedView>
             </ThemedView>
 
             {/* Bottom Division */}
@@ -373,11 +637,32 @@ const styles = StyleSheet.create({
         color: '#888',
         fontStyle: 'italic',
     },
+    projectTraitsText: {
+        fontSize: 12,
+        color: '#666',
+        marginBottom: 3,
+    },
+    stepsText: {
+        fontSize: 12,
+        color: '#888',
+        fontStyle: 'italic',
+    },
     noProjectsText: {
         textAlign: 'center',
         color: '#666',
         fontSize: 16,
         fontStyle: 'italic',
+    },
+    populatingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    populatingText: {
+        marginLeft: 10,
+        fontSize: 16,
+        color: '#666',
     },
     bottomDivision: {
         padding: 20,
@@ -389,5 +674,60 @@ const styles = StyleSheet.create({
         color: '#333',
         lineHeight: 24,
         textAlign: 'justify',
+    },
+    generateProjectSection: {
+        marginTop: 20,
+        padding: 20,
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    generateProjectTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    generateProjectDescription: {
+        fontSize: 14,
+        color: '#666',
+        textAlign: 'center',
+        marginBottom: 16,
+        lineHeight: 20,
+    },
+    generateErrorText: {
+        fontSize: 14,
+        color: '#ff3b30',
+        textAlign: 'center',
+        marginBottom: 16,
+        lineHeight: 20,
+    },
+    generateButtonContainer: {
+        alignItems: 'center',
+    },
+    generateButton: {
+        backgroundColor: '#007AFF',
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 200,
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 3.84,
+        elevation: 5,
+    },
+    generateButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });
