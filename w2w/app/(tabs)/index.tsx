@@ -169,7 +169,10 @@ export default function HomeScreen() {
       const userId = await getUserId();
       if (userId) {
         console.log('🔄 Refreshing user profile data...');
-        const userDataResponse = await fetchUserProfileData(userId);
+        const [userDataResponse, profileInfo] = await Promise.all([
+          fetchUserProfileData(userId),
+          checkProfileCompletion(userId)
+        ]);
         
         if (userDataResponse) {
           console.log('🔄 Updated user profile data:', {
@@ -178,15 +181,38 @@ export default function HomeScreen() {
             progress: userDataResponse.progress
           });
           setUserData(userDataResponse);
-          setUserName(userDataResponse.name || 'User');
         } else {
           // If no data found, try to initialize
           console.log('🔄 No user data found, initializing...');
           const initializedData = await initializeUserProfile(userId);
           if (initializedData) {
             setUserData(initializedData);
-            setUserName(initializedData.name);
           }
+        }
+        
+        // Update profile completion data and prioritize firstName/lastName
+        if (profileInfo.profileCompleted && profileInfo.profileData) {
+          console.log('🔄 Profile completion data found:', profileInfo.profileData);
+          setUserProfile(profileInfo.profileData);
+          
+          // Prioritize firstName and lastName from profile completion
+          if (profileInfo.profileData.firstName && profileInfo.profileData.lastName) {
+            const fullName = `${profileInfo.profileData.firstName} ${profileInfo.profileData.lastName}`;
+            console.log('🔄 Using profile completion name:', fullName);
+            setUserName(fullName);
+          } else if (userDataResponse?.name) {
+            console.log('🔄 Using user data name:', userDataResponse.name);
+            setUserName(userDataResponse.name);
+          } else {
+            console.log('🔄 Using default name: User');
+            setUserName('User');
+          }
+        } else if (userDataResponse?.name) {
+          console.log('🔄 Using user data name (no profile completion):', userDataResponse.name);
+          setUserName(userDataResponse.name);
+        } else {
+          console.log('🔄 Using default name (no profile data): User');
+          setUserName('User');
         }
       }
     } catch (error) {
@@ -231,6 +257,13 @@ export default function HomeScreen() {
         achievement_title: userData.achievement_title,
         progress: userData.progress,
         materials_count: userData.Materials?.length || 0
+      });
+      
+      // Log name priority logic
+      console.log('👤 Name priority check:', {
+        has_userData_name: !!userData.name,
+        userData_name: userData.name,
+        note: 'Will check profile completion data for firstName/lastName'
       });
       
       // Check if we need to initialize default values
@@ -284,25 +317,38 @@ export default function HomeScreen() {
             progress: userDataResponse.progress
           });
           setUserData(userDataResponse);
-          setUserName(userDataResponse.name || 'User');
         } else {
           // If no user data found, try to initialize with defaults
           console.log('👤 No user data found, initializing with defaults...');
           const initializedData = await initializeUserProfile(userId);
           if (initializedData) {
             setUserData(initializedData);
-            setUserName(initializedData.name);
           }
         }
         
-        // Set profile data (from profile completion check)
+        // Set profile data (from profile completion check) and prioritize firstName/lastName
         if (profileInfo.profileCompleted && profileInfo.profileData) {
           console.log('👤 Profile completion data found:', profileInfo.profileData);
           setUserProfile(profileInfo.profileData);
-          // Use profile completion name if available, otherwise keep userData name
+          
+          // Prioritize firstName and lastName from profile completion
           if (profileInfo.profileData.firstName && profileInfo.profileData.lastName) {
-            setUserName(`${profileInfo.profileData.firstName} ${profileInfo.profileData.lastName}`);
+            const fullName = `${profileInfo.profileData.firstName} ${profileInfo.profileData.lastName}`;
+            console.log('👤 Using profile completion name:', fullName);
+            setUserName(fullName);
+          } else if (userDataResponse?.name) {
+            console.log('👤 Using user data name:', userDataResponse.name);
+            setUserName(userDataResponse.name);
+          } else {
+            console.log('👤 Using default name: User');
+            setUserName('User');
           }
+        } else if (userDataResponse?.name) {
+          console.log('👤 Using user data name (no profile completion):', userDataResponse.name);
+          setUserName(userDataResponse.name);
+        } else {
+          console.log('👤 Using default name (no profile data): User');
+          setUserName('User');
         }
         
         // Fetch current project if user has one
@@ -512,7 +558,7 @@ export default function HomeScreen() {
             <View style={styles.profileSectionHeader}>
               <ThemedText type="subtitle">Profile</ThemedText>
               <View style={styles.profileHeaderActions}>
-                {(!userData?.name || !userData?.achievement_title || userData?.progress === undefined) && (
+                {(!userProfile?.firstName || !userProfile?.lastName || !userData?.achievement_title || userData?.progress === undefined) && (
                   <Pressable
                     style={styles.initializeButton}
                     onPress={async () => {
@@ -560,12 +606,15 @@ export default function HomeScreen() {
                 </Pressable>
                 <View style={styles.profileInfo}>
                   <ThemedText type="defaultSemiBold" style={styles.profileName}>
-                    {userData?.name || userName || 'User'}
+                    {userProfile?.firstName && userProfile?.lastName 
+                      ? `${userProfile.firstName} ${userProfile.lastName}`
+                      : userData?.name || userName || 'User'
+                    }
                   </ThemedText>
                   <ThemedText style={styles.achievementTitle}>
                     {userData?.achievement_title || 'Recycling Beginner'}
                   </ThemedText>
-                  {(!userData?.name || !userData?.achievement_title || userData?.progress === undefined) && (
+                  {(!userProfile?.firstName || !userProfile?.lastName || !userData?.achievement_title || userData?.progress === undefined) && (
                     <ThemedText style={styles.profileHint}>
                       Tap the + icon to initialize your profile
                     </ThemedText>
