@@ -4,9 +4,12 @@ import base64
 import tempfile
 import random
 import uuid
+import hashlib
+from datetime import datetime
 from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
 import json as _json
 #Database (Firestore) setup
@@ -58,6 +61,54 @@ from google.genai import types
 client = genai.Client(api_key="AIzaSyDRT3lI3JrVKvg41ZbIp1l2Hibilae7EWU")
 app = Flask(__name__)
 CORS(app)  # allow all origins for development; tighten in production
+
+# Image upload configuration
+UPLOAD_FOLDER = 'uploads/profile_images'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+PROFILE_IMAGE_SIZE = (400, 400)  # Standard profile image size
+
+# Ensure upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def generate_unique_filename(user_id, original_filename):
+    """Generate a unique filename for the user's profile image"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    extension = original_filename.rsplit('.', 1)[1].lower()
+    return f"{user_id}_{timestamp}.{extension}"
+
+def process_profile_image(image_path):
+    """Process and resize profile image"""
+    try:
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary (handles RGBA, P mode, etc.)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Resize and crop to square
+            img.thumbnail(PROFILE_IMAGE_SIZE, Image.Resampling.LANCZOS)
+            
+            # Create a square image by cropping
+            width, height = img.size
+            if width != height:
+                size = min(width, height)
+                left = (width - size) // 2
+                top = (height - size) // 2
+                right = left + size
+                bottom = top + size
+                img = img.crop((left, top, right, bottom))
+            
+            # Save processed image
+            img.save(image_path, 'JPEG', quality=85, optimize=True)
+            return True
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return False
 
 #Routes
 
@@ -258,54 +309,32 @@ def get_recycling_projects(material_id):
         if db is None:
             return jsonify({'error': 'Database not initialized'}), 500
         
-        # For now, return sample projects. In a real app, you'd query a Projects collection
-        # based on material_id or material traits
-        sample_projects = [
-            {
-                "id": "project_1",
-                "title": "DIY Plant Pot",
-                "description": "Transform your waste into a beautiful plant pot for your home garden.",
-                "imageUrl": None,
-                "difficulty": "easy",
-                "materialsNeeded": [material_id, "scissors", "soil", "seeds"],
-                "instructions": [
-                    "Clean the material thoroughly",
-                    "Cut or shape as needed for pot structure",
-                    "Add drainage holes if necessary",
-                    "Fill with soil and plant your seeds"
-                ]
-            },
-            {
-                "id": "project_2", 
-                "title": "Storage Container",
-                "description": "Create organized storage solutions from recycled materials.",
-                "imageUrl": None,
-                "difficulty": "medium",
-                "materialsNeeded": [material_id, "paint", "brushes", "decorations"],
-                "instructions": [
-                    "Clean and prepare the material",
-                    "Paint or decorate as desired",
-                    "Add labels or dividers if needed",
-                    "Use for organizing small items"
-                ]
-            },
-            {
-                "id": "project_3",
-                "title": "Art & Craft Project",
-                "description": "Express your creativity with unique recycled art projects.",
-                "imageUrl": None,
-                "difficulty": "hard",
-                "materialsNeeded": [material_id, "paint", "glue", "other craft supplies"],
-                "instructions": [
-                    "Plan your design",
-                    "Prepare and clean materials",
-                    "Assemble and decorate",
-                    "Display your creation"
-                ]
-            }
-        ]
-        
-        return jsonify(sample_projects)
+        # Query the Recycling collection for projects related to this material
+        try:
+            # Get all projects from Recycling collection
+            projects = []
+            recycling_projects = db.collection('Recycling').stream()
+            
+            for doc in recycling_projects:
+                project_data = doc.to_dict()
+                project_data['id'] = doc.id
+                
+                # Convert to the expected format for compatibility
+                converted_project = {
+                    "id": doc.id,
+                    "title": project_data.get('project_name', 'Untitled Project'),
+                    "description": f"Transform {project_data.get('material_name', 'materials')} into something useful",
+                    "imageUrl": project_data.get('project_image'),
+                    "difficulty": "medium",  # Default difficulty
+                    "materialsNeeded": [material_id] + project_data.get('required_traits', []),
+                    "instructions": project_data.get('steps', [])
+                }
+                projects.append(converted_project)
+            
+            return jsonify(projects)
+        except Exception as e:
+            print(f"Error fetching projects from Recycling collection: {e}")
+            return jsonify([])
         
     except Exception as e:
         print(f"Error fetching recycling projects: {e}")
@@ -495,6 +524,12 @@ def get_recycling_project(project_id):
         project_data = project_doc.to_dict()
         project_data['id'] = project_doc.id
         
+        print(f"Retrieved project from database: {project_data}")
+        print(f"Retrieved project steps: {project_data.get('steps', [])}")
+        if project_data.get('steps'):
+            print(f"Retrieved project first step length: {len(str(project_data['steps'][0]))}")
+            print(f"Retrieved project first step content: {str(project_data['steps'][0])}")
+        
         return jsonify(project_data)
         
     except Exception as e:
@@ -518,149 +553,38 @@ def populate_recycling_table():
         print(f"Material traits: {material_traits}")
         print(f"Request data: {data}")
         
-        # Sample recycling projects data
-        sample_projects = [
-            {
-                'material_name': 'Plastic Bottles',
-                'project_image': '/images/plastic-bottle-planter.jpg',
-                'project_name': 'Plastic Bottle Planter',
-                'required_traits': ['Clean', 'Intact', 'Medium-sized'],
-                'steps': [
-                    'Clean the plastic bottle thoroughly',
-                    'Cut the top third of the bottle off',
-                    'Poke drainage holes in the bottom',
-                    'Add soil and plant your seeds',
-                    'Water regularly and watch it grow!'
-                ]
-            },
-            {
-                'material_name': 'Glass Jars',
-                'project_image': '/images/glass-jar-candles.jpg',
-                'project_name': 'Glass Jar Candles',
-                'required_traits': ['Clean', 'No cracks', 'Wide opening'],
-                'steps': [
-                    'Remove all labels and clean the jar',
-                    'Melt candle wax in a double boiler',
-                    'Add wick to the center of the jar',
-                    'Pour melted wax into the jar',
-                    'Let cool and trim the wick'
-                ]
-            },
-            {
-                'material_name': 'Cardboard Boxes',
-                'project_image': '/images/cardboard-organizer.jpg',
-                'project_name': 'Cardboard Storage Organizer',
-                'required_traits': ['Clean', 'Sturdy', 'Medium-sized'],
-                'steps': [
-                    'Cut cardboard into desired shapes',
-                    'Create compartments using dividers',
-                    'Cover with decorative paper or fabric',
-                    'Assemble using glue or tape',
-                    'Organize your items!'
-                ]
-            },
-            {
-                'material_name': 'Tin Cans',
-                'project_image': '/images/tin-can-pencil-holder.jpg',
-                'project_name': 'Tin Can Pencil Holder',
-                'required_traits': ['Clean', 'No sharp edges', 'Various sizes'],
-                'steps': [
-                    'Remove labels and clean thoroughly',
-                    'Sand any rough edges',
-                    'Paint or decorate as desired',
-                    'Let dry completely',
-                    'Organize your writing supplies'
-                ]
-            },
-            {
-                'material_name': 'Old T-Shirts',
-                'project_image': '/images/t-shirt-tote-bag.jpg',
-                'project_name': 'T-Shirt Tote Bag',
-                'required_traits': ['Clean', 'No holes', 'Cotton material'],
-                'steps': [
-                    'Cut off sleeves and neckline',
-                    'Cut strips along the bottom',
-                    'Tie strips together to close bottom',
-                    'Add handles by cutting armholes',
-                    'Use as a reusable shopping bag'
-                ]
-            },
-            {
-                'material_name': 'Wine Corks',
-                'project_image': '/images/cork-board.jpg',
-                'project_name': 'Cork Bulletin Board',
-                'required_traits': ['Clean', 'Intact', 'Various sizes'],
-                'steps': [
-                    'Collect enough corks for your board size',
-                    'Cut some corks in half lengthwise',
-                    'Arrange corks in desired pattern',
-                    'Glue corks to a backing board',
-                    'Hang and use for notes and photos'
-                ]
-            }
-        ]
-        
         # Check existing projects to avoid duplicates
         existing_projects = db.collection('Recycling').stream()
-        existing_project_names = set()
         existing_count = 0
         for doc in existing_projects:
             existing_count += 1
-            project_data = doc.to_dict()
-            if 'project_name' in project_data:
-                existing_project_names.add(project_data['project_name'])
         
         print(f"Found {existing_count} existing projects in Recycling collection")
-        print(f"Existing project names: {list(existing_project_names)}")
         
-        # Add only new projects that don't already exist
         added_projects = []
-        for project in sample_projects:
-            print(f"Checking project: {project['project_name']}")
-            if project['project_name'] not in existing_project_names:
-                print(f"Adding new project: {project['project_name']}")
-                # Generate a unique document ID
+        
+        # Only create Gemini-generated projects for the specific material
+        if material_name and scanned_material_id:
+            print(f"Creating Gemini-generated project for material: {material_name}")
+            custom_project = create_custom_recycling_project(material_name, material_traits, scanned_material_id)
+            if custom_project:
+                print(f"Saving custom project to database: {custom_project}")
+                print(f"Custom project steps being saved: {custom_project.get('steps', [])}")
+                if custom_project.get('steps'):
+                    print(f"Custom project first step length being saved: {len(str(custom_project['steps'][0]))}")
+                    print(f"Custom project first step content being saved: {str(custom_project['steps'][0])}")
                 doc_ref = db.collection('Recycling').document()
-                doc_ref.set(project)
+                doc_ref.set(custom_project)
                 added_projects.append({
                     'id': doc_ref.id,
-                    **project
+                    **custom_project
                 })
-                existing_project_names.add(project['project_name'])  # Add to set to prevent duplicates in same batch
+                print(f"Added Gemini-generated custom project: {custom_project['project_name']}")
             else:
-                print(f"Project already exists, skipping: {project['project_name']}")
+                print(f"Failed to generate custom project for {material_name}")
         
-        # If we have material details and no relevant projects were found, create a custom project
-        if material_name and scanned_material_id:
-            material_lower = material_name.lower()
-            relevant_project_found = False
-            
-            # Check if any of the added projects are relevant to the scanned material
-            for project in added_projects:
-                project_material = project['material_name'].lower()
-                if (material_lower in project_material or 
-                    project_material in material_lower or
-                    any(trait.lower() in project_material for trait in material_traits)):
-                    relevant_project_found = True
-                    break
-            
-            # If no relevant project found, create a custom one using Gemini
-            if not relevant_project_found:
-                print(f"Creating custom Gemini-generated project for material: {material_name}")
-                custom_project = create_custom_recycling_project(material_name, material_traits, scanned_material_id)
-                if custom_project:
-                    doc_ref = db.collection('Recycling').document()
-                    doc_ref.set(custom_project)
-                    added_projects.append({
-                        'id': doc_ref.id,
-                        **custom_project
-                    })
-                    print(f"Added Gemini-generated custom project: {custom_project['project_name']}")
-                else:
-                    print(f"Failed to generate custom project for {material_name}")
-        
-        # If the table was completely empty and we have material details, generate additional projects
-        elif material_name and existing_count == 0 and added_projects:
+        # If the table was completely empty, generate 2-3 additional creative projects for variety
+        if material_name and existing_count == 0:
             print(f"Table was empty, generating additional Gemini projects for {material_name}")
             # Generate 2-3 additional creative projects for variety
             for i in range(2):
@@ -776,18 +700,30 @@ def create_custom_recycling_project(material_name, material_traits, material_id)
             contents=[prompt]
         )
         
+        # Log raw Gemini response
+        print(f"Raw Gemini response: {response.text}")
+        print(f"Raw Gemini response length: {len(response.text)}")
+        
         # Parse the response
         project_data = _json.loads(response.text.strip())
+        print(f"Parsed project data: {project_data}")
         
         # Validate and clean the data
-        project_name = str(project_data.get('project_name', f'{material_name} Upcycling Project'))[:50]
+        project_name = str(project_data.get('project_name', f'{material_name} Upcycling Project'))
         required_traits = project_data.get('required_traits', ['Clean', 'Intact'])
         steps = project_data.get('steps', [])
+        
+        print(f"Initial steps from Gemini: {steps}")
+        print(f"Initial steps count: {len(steps)}")
+        if steps:
+            print(f"First step length: {len(str(steps[0]))}")
+            print(f"First step content: {str(steps[0])}")
         
         # Ensure we have valid data
         if not isinstance(required_traits, list):
             required_traits = ['Clean', 'Intact']
         if not isinstance(steps, list) or len(steps) < 1:
+            print("Using fallback steps due to invalid data")
             steps = [
                 f"Clean the {material_name.lower()} thoroughly",
                 "Prepare materials and tools needed",
@@ -796,8 +732,13 @@ def create_custom_recycling_project(material_name, material_traits, material_id)
                 "Complete and enjoy your creation!"
             ]
         
-        # Ensure steps are strings and limit length for safety
-        steps = [str(step)[:200] for step in steps]  # Limit each step to 200 chars but keep all steps
+        # Ensure steps are strings
+        steps = [str(step) for step in steps]  # Keep all steps without character limit
+        print(f"Final steps after processing: {steps}")
+        print(f"Final steps count: {len(steps)}")
+        if steps:
+            print(f"Final first step length: {len(steps[0])}")
+            print(f"Final first step content: {steps[0]}")
         
         # Ensure required traits are reasonable
         required_traits = [str(trait)[:30] for trait in required_traits[:5]]  # Limit traits
@@ -810,59 +751,20 @@ def create_custom_recycling_project(material_name, material_traits, material_id)
             'steps': steps
         }
         
-        print(f"Final custom project: {custom_project}")
+        print(f"Custom project to be returned: {custom_project}")
+        print(f"Steps being returned: {custom_project['steps']}")
+        print(f"Steps count being returned: {len(custom_project['steps'])}")
+        if custom_project['steps']:
+            print(f"First step being returned - length: {len(custom_project['steps'][0])}")
+            print(f"First step being returned - content: {custom_project['steps'][0]}")
+        
         return custom_project
         
     except Exception as e:
         print(f"Error creating custom project with Gemini: {e}")
-        # Fallback to a simple generic project
-        return create_fallback_custom_project(material_name, material_traits)
-
-def create_fallback_custom_project(material_name, material_traits):
-    """Create a simple fallback project if Gemini fails"""
-    try:
-        material_lower = material_name.lower()
-        
-        # Simple fallback based on material type
-        if 'plastic' in material_lower:
-            project_name = f"{material_name} Planter"
-            steps = [
-                f"Clean the {material_name.lower()} thoroughly",
-                "Cut or modify the shape as needed",
-                "Add drainage holes if necessary",
-                "Fill with soil and plant seeds",
-                "Water regularly and watch it grow!"
-            ]
-        elif 'glass' in material_lower:
-            project_name = f"{material_name} Candle Holder"
-            steps = [
-                f"Remove all labels from the {material_name.lower()}",
-                "Clean thoroughly with soap and water",
-                "Melt candle wax in a double boiler",
-                "Add wick to the center",
-                "Pour melted wax and let cool"
-            ]
-        else:
-            project_name = f"{material_name} Art Project"
-            steps = [
-                f"Clean the {material_name.lower()} thoroughly",
-                "Plan your design or decoration",
-                "Gather art supplies (paint, glue, etc.)",
-                "Create your unique art piece",
-                "Display your creation proudly"
-            ]
-        
-        return {
-            'material_name': material_name,
-            'project_image': f'/images/{material_name.lower().replace(" ", "-")}-project.jpg',
-            'project_name': project_name,
-            'required_traits': ['Clean', 'Intact'],
-            'steps': steps
-        }
-        
-    except Exception as e:
-        print(f"Error creating fallback project: {e}")
+        # Return None if Gemini fails - no fallback projects
         return None
+
 
 @app.route('/recycling/generate-custom', methods=['POST'])
 def generate_custom_project():
@@ -885,6 +787,12 @@ def generate_custom_project():
         custom_project = create_custom_recycling_project(material_name, material_traits, scanned_material_id)
         
         if custom_project:
+            print(f"Saving generated custom project to database: {custom_project}")
+            print(f"Generated custom project steps: {custom_project.get('steps', [])}")
+            if custom_project.get('steps'):
+                print(f"Generated custom project first step length: {len(str(custom_project['steps'][0]))}")
+                print(f"Generated custom project first step content: {str(custom_project['steps'][0])}")
+            
             # Save to database
             doc_ref = db.collection('Recycling').document()
             doc_ref.set(custom_project)
@@ -1341,6 +1249,172 @@ def handle_profile(user_id):
             return jsonify({'error': str(e)}), 500
 
 
+@app.route('/user/<user_id>/profile-image', methods=['POST'])
+def upload_profile_image(user_id):
+    """Upload a profile image for a user"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Check if user exists
+        user_doc = db.collection('User_collection').document(user_id).get()
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Check if file is present in request
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image file provided'}), 400
+        
+        file = request.files['image']
+        
+        # Check if file is selected
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate file
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Invalid file type. Allowed types: PNG, JPG, JPEG, GIF, WEBP'}), 400
+        
+        # Check file size
+        file.seek(0, 2)  # Seek to end
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({'error': f'File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB'}), 400
+        
+        # Generate unique filename
+        filename = generate_unique_filename(user_id, file.filename)
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        
+        # Save file
+        file.save(file_path)
+        
+        # Process image (resize, crop, optimize)
+        if not process_profile_image(file_path):
+            # Clean up file if processing failed
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return jsonify({'error': 'Failed to process image'}), 500
+        
+        # Generate URL for the image
+        image_url = f"/uploads/profile_images/{filename}"
+        
+        # Update user document with image URL
+        db.collection('User_collection').document(user_id).update({
+            'profileImageUrl': image_url,
+            'profileImageUpdatedAt': datetime.utcnow()
+        })
+        
+        print(f"Profile image uploaded for user {user_id}: {filename}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Profile image uploaded successfully',
+            'imageUrl': image_url
+        })
+        
+    except Exception as e:
+        print(f"Error uploading profile image: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>/profile-image', methods=['GET'])
+def get_profile_image(user_id):
+    """Get user's profile image URL"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_doc.to_dict()
+        image_url = user_data.get('profileImageUrl')
+        
+        if not image_url:
+            return jsonify({
+                'success': True,
+                'hasImage': False,
+                'message': 'No profile image found'
+            })
+        
+        # Check if file actually exists
+        filename = image_url.split('/')[-1]
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        
+        if not os.path.exists(file_path):
+            # Clean up database reference if file doesn't exist
+            db.collection('User_collection').document(user_id).update({
+                'profileImageUrl': None
+            })
+            return jsonify({
+                'success': True,
+                'hasImage': False,
+                'message': 'Profile image file not found'
+            })
+        
+        return jsonify({
+            'success': True,
+            'hasImage': True,
+            'imageUrl': image_url,
+            'updatedAt': user_data.get('profileImageUpdatedAt')
+        })
+        
+    except Exception as e:
+        print(f"Error getting profile image: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/user/<user_id>/profile-image', methods=['DELETE'])
+def delete_profile_image(user_id):
+    """Delete user's profile image"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_doc.to_dict()
+        image_url = user_data.get('profileImageUrl')
+        
+        if image_url:
+            # Delete file from filesystem
+            filename = image_url.split('/')[-1]
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"Deleted profile image file: {filename}")
+            
+            # Remove from database
+            db.collection('User_collection').document(user_id).update({
+                'profileImageUrl': None,
+                'profileImageUpdatedAt': None
+            })
+            
+            return jsonify({
+                'success': True,
+                'message': 'Profile image deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'message': 'No profile image to delete'
+            })
+        
+    except Exception as e:
+        print(f"Error deleting profile image: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/quests/generate', methods=['POST'])
 def generate_new_quests():
     """Generate new quests using Gemini API when database is running low"""
@@ -1767,6 +1841,90 @@ def update_user_quest_progress(user_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/user/<user_id>/current-project', methods=['POST'])
+def set_user_current_project(user_id):
+    """Set a project as the user's current project"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        data = request.get_json()
+        project_id = data.get('project_id')
+        
+        if not project_id:
+            return jsonify({'error': 'Project ID is required'}), 400
+        
+        # Verify the project exists
+        project_doc = db.collection('Recycling').document(project_id).get()
+        if not project_doc.exists:
+            return jsonify({'error': 'Project not found'}), 404
+        
+        # Update user document with current project
+        user_doc = db.collection('User_collection').document(user_id).get()
+        
+        if user_doc.exists:
+            # Update existing user document
+            db.collection('User_collection').document(user_id).update({
+                'current_project_id': project_id,
+                'current_project_set_at': datetime.utcnow()
+            })
+        else:
+            # Create new user document with current project
+            db.collection('User_collection').document(user_id).set({
+                'current_project_id': project_id,
+                'current_project_set_at': datetime.utcnow(),
+                'createdAt': datetime.utcnow()
+            })
+        
+        print(f"Set current project {project_id} for user {user_id}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Current project set successfully',
+            'project_id': project_id
+        })
+        
+    except Exception as e:
+        print(f"Error setting current project: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/user/<user_id>/current-project', methods=['GET'])
+def get_user_current_project(user_id):
+    """Get user's current project"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        
+        if not user_doc.exists:
+            return jsonify({'current_project': None})
+        
+        user_data = user_doc.to_dict()
+        current_project_id = user_data.get('current_project_id')
+        
+        if not current_project_id:
+            return jsonify({'current_project': None})
+        
+        # Get project details
+        project_doc = db.collection('Recycling').document(current_project_id).get()
+        if project_doc.exists:
+            project_data = project_doc.to_dict()
+            project_data['id'] = project_doc.id
+            return jsonify({'current_project': project_data})
+        else:
+            # Project was deleted, clear it from user
+            db.collection('User_collection').document(user_id).update({
+                'current_project_id': None,
+                'current_project_set_at': None
+            })
+            return jsonify({'current_project': None})
+        
+    except Exception as e:
+        print(f"Error getting current project: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/user/<user_id>/quests/stats', methods=['GET'])
 def get_user_quest_stats(user_id):
     """Get user's quest statistics"""
@@ -1876,6 +2034,17 @@ def check_and_generate_quests():
     except Exception as e:
         print(f"Error in check_and_generate_quests: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/uploads/profile_images/<filename>')
+def serve_profile_image(filename):
+    """Serve profile images as static files"""
+    try:
+        from flask import send_from_directory
+        return send_from_directory(UPLOAD_FOLDER, filename)
+    except Exception as e:
+        print(f"Error serving image {filename}: {e}")
+        return jsonify({'error': 'Image not found'}), 404
 
 
 if __name__ == '__main__':

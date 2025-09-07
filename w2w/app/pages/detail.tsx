@@ -360,50 +360,64 @@ export default function DetailScreen() {
 
     useEffect(() => {
         const loadPageData = async () => {
-            if (params.scanData) {
-                try {
-                    setLoading(true);
+            try {
+                setLoading(true);
+                let materialId: string;
+                let material: MaterialData | null = null;
+                
+                // Handle both scanData (from scanning) and materialId (from navigation)
+                if (params.scanData) {
                     const data = JSON.parse(params.scanData as string);
                     setScanData(data);
                     
                     if (data['Scanned Material'] && data['Scanned Material'].length > 0) {
-                        const material = data['Scanned Material'][0];
-                        const materialId = material.id || material.Name;
+                        material = data['Scanned Material'][0];
+                        materialId = material?.id || material?.Name || '';
+                        
+                        if (!materialId) {
+                            throw new Error('No valid material ID found');
+                        }
                         
                         // Log the scan first
                         await logScan(materialId);
-                        
-                        // Fetch material details first to get the material name
-                        const materialDetails = await fetchMaterialDetails(materialId);
-                        
-                        // Fetch remaining data in parallel
-                        const [projects, disposalMethods, relatedMaterials] = await Promise.all([
-                            fetchRecyclingProjects(materialId, materialDetails?.Name),
-                            fetchDisposalMethods(materialId),
-                            fetchRelatedMaterials(materialId)
-                        ]);
-                        
-                        // Combine all data
-                        const pageData: DetailPageData = {
-                            material: materialDetails || material,
-                            recyclingProjects: projects,
-                            disposalMethods: disposalMethods,
-                            relatedMaterials: relatedMaterials
-                        };
-                        
-                        setPageData(pageData);
+                    } else {
+                        throw new Error('No scanned material data found');
                     }
-                } catch (error) {
-                    console.error('Error loading page data:', error);
-                    setError('Failed to load material details');
-                } finally {
-                    setLoading(false);
+                } else if (params.materialId) {
+                    materialId = params.materialId as string;
+                } else {
+                    throw new Error('No material ID or scan data provided');
                 }
+                
+                // Fetch material details first to get the material name
+                const materialDetails = await fetchMaterialDetails(materialId);
+                
+                // Fetch remaining data in parallel
+                const [projects, disposalMethods, relatedMaterials] = await Promise.all([
+                    fetchRecyclingProjects(materialId, materialDetails?.Name),
+                    fetchDisposalMethods(materialId),
+                    fetchRelatedMaterials(materialId)
+                ]);
+                
+                // Combine all data
+                const pageData: DetailPageData = {
+                    material: materialDetails || material || { id: materialId, Name: materialId, Traits: [] },
+                    recyclingProjects: projects,
+                    disposalMethods: disposalMethods,
+                    relatedMaterials: relatedMaterials
+                };
+                
+                setPageData(pageData);
+            } catch (error) {
+                console.error('Error loading page data:', error);
+                setError('Failed to load material details');
+            } finally {
+                setLoading(false);
             }
         };
         
         loadPageData();
-    }, [params.scanData]);
+    }, [params.scanData, params.materialId]);
 
     if (loading) {
         return (
@@ -432,6 +446,13 @@ export default function DetailScreen() {
 
     return (
         <ScrollView style={styles.container}>
+            {/* Back Button */}
+            <ThemedView style={styles.backButtonContainer}>
+                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                    <ThemedText style={styles.backButtonText}>← Back</ThemedText>
+                </TouchableOpacity>
+            </ThemedView>
+            
             {/* Top Division */}
             <ThemedView style={styles.topDivision}>
                 <ThemedView style={styles.imageBox}>
@@ -543,6 +564,25 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#f5f5f5',
+    },
+    backButtonContainer: {
+        paddingHorizontal: 16,
+        paddingTop: 16,
+        paddingBottom: 8,
+    },
+    backButton: {
+        alignSelf: 'flex-start',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        backgroundColor: '#f0f0f0',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#ddd',
+    },
+    backButtonText: {
+        color: '#007AFF',
+        fontSize: 16,
+        fontWeight: '500',
     },
     loadingContainer: {
         flex: 1,

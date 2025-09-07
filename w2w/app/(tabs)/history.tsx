@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -21,23 +22,24 @@ interface MaterialData {
   imageUrl?: string;
 }
 
-interface ProjectData {
+interface RecyclingProject {
   id: string;
-  title: string;
-  description: string;
-  imageUrl?: string;
-  difficulty: string;
-  materialsNeeded: string[];
+  material_name: string;
+  project_image: string;
+  project_name: string;
+  required_traits: string[];
+  steps: string[];
 }
 
 interface ScanHistoryItem {
   material: MaterialData;
-  projects: ProjectData[];
+  projects: RecyclingProject[];
   scanDate?: string;
 }
 
 export default function HistoryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
+  const router = useRouter();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,16 +69,53 @@ export default function HistoryScreen() {
     }
   };
 
-  // Fetch projects for a material
-  const fetchMaterialProjects = async (materialId: string) => {
+  // Fetch recycling projects for a material
+  const fetchRecyclingProjects = async (materialName: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/projects/${materialId}`);
-      if (!response.ok) throw new Error('Failed to fetch projects');
-      return await response.json();
+      const response = await fetch(`${API_BASE_URL}/recycling`);
+      if (!response.ok) throw new Error('Failed to fetch recycling projects');
+      const data = await response.json();
+      
+      // Filter projects that match the material name
+      const filteredProjects = data.projects.filter((project: RecyclingProject) => {
+        const projectMaterial = project.material_name.toLowerCase();
+        const searchName = materialName.toLowerCase();
+        
+        // Direct match
+        if (projectMaterial === searchName) return true;
+        
+        // Substring match
+        if (projectMaterial.includes(searchName) || searchName.includes(projectMaterial)) return true;
+        
+        // Check for common material types
+        const materialTypes = ['plastic', 'glass', 'metal', 'paper', 'cardboard', 'fabric', 'wood'];
+        const projectHasType = materialTypes.some(type => projectMaterial.includes(type));
+        const materialHasType = materialTypes.some(type => searchName.includes(type));
+        
+        if (projectHasType && materialHasType) {
+          return materialTypes.some(type => 
+            projectMaterial.includes(type) && searchName.includes(type)
+          );
+        }
+        
+        return false;
+      });
+      
+      return filteredProjects.slice(0, 3); // Limit to 3 projects per material
     } catch (error) {
-      console.error('Error fetching projects:', error);
+      console.error('Error fetching recycling projects:', error);
       return [];
     }
+  };
+
+  // Navigate to project detail page
+  const navigateToProjectDetail = (projectId: string) => {
+    router.push(`/pages/project-detail?projectId=${projectId}`);
+  };
+
+  // Navigate to material detail page
+  const navigateToMaterialDetail = (materialId: string) => {
+    router.push(`/pages/detail?materialId=${materialId}`);
   };
 
   // Load scan history on component mount
@@ -100,10 +139,10 @@ export default function HistoryScreen() {
           const historyPromises = userMaterialsData.map(async (materialId: string) => {
             const materialDetails = await fetchMaterialDetails(materialId);
             if (materialDetails) {
-              const projects = await fetchMaterialProjects(materialId);
+              const projects = await fetchRecyclingProjects(materialDetails.Name);
               return {
                 material: materialDetails,
-                projects: projects.slice(0, 2), // Limit to 2 projects per material
+                projects: projects,
                 scanDate: new Date().toLocaleDateString() // You can add actual scan dates to your backend
               };
             }
@@ -172,7 +211,11 @@ export default function HistoryScreen() {
         {scanHistory.length > 0 ? (
           scanHistory.map((scanItem, index) => (
             <View key={scanItem.material.id} style={styles.scanCard}>
-              <View style={styles.scanCardTop}>
+              <TouchableOpacity 
+                style={styles.scanCardTop}
+                onPress={() => navigateToMaterialDetail(scanItem.material.id)}
+                activeOpacity={0.7}
+              >
                 <Image
                   source={scanItem.material.imageUrl ? { uri: scanItem.material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
                   style={styles.scanCardImage}
@@ -187,24 +230,34 @@ export default function HistoryScreen() {
                   {scanItem.scanDate && (
                     <ThemedText style={styles.scanCardDate}>Scanned: {scanItem.scanDate}</ThemedText>
                   )}
+                  <ThemedText style={styles.tapToViewText}>
+                    Tap to view details →
+                  </ThemedText>
                 </View>
-              </View>
+              </TouchableOpacity>
               <View style={styles.scanCardBottom}>
                 <ThemedText style={styles.scanCardProjectsTitle}>Possible Projects:</ThemedText>
                 <View style={styles.scanCardProjectsRow}>
                   {scanItem.projects.length > 0 ? (
                     scanItem.projects.map((project, projectIndex) => (
-                      <View key={project.id} style={styles.scanCardProject}>
+                      <TouchableOpacity 
+                        key={project.id} 
+                        style={styles.scanCardProject}
+                        onPress={() => navigateToProjectDetail(project.id)}
+                        activeOpacity={0.7}
+                      >
                         <Image
-                          source={project.imageUrl ? { uri: project.imageUrl } : require('@/assets/images/partial-react-logo.png')}
+                          source={project.project_image ? { uri: project.project_image } : require('@/assets/images/partial-react-logo.png')}
                           style={styles.scanCardProjectImage}
                           resizeMode="contain"
                         />
-                        <ThemedText style={styles.scanCardProjectName}>{project.title}</ThemedText>
+                        <ThemedText style={styles.scanCardProjectName}>{project.project_name}</ThemedText>
                         <ThemedText style={styles.scanCardProjectDifficulty}>
-                          {project.difficulty}
+                          {project.steps.length <= 3 ? 'Easy' : 
+                           project.steps.length <= 6 ? 'Medium' : 'Advanced'}
                         </ThemedText>
-                      </View>
+                        <ThemedText style={styles.tapToViewText}>Tap to view →</ThemedText>
+                      </TouchableOpacity>
                     ))
                   ) : (
                     <ThemedText style={styles.noProjectsText}>No projects available</ThemedText>
@@ -424,6 +477,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#888',
     textTransform: 'capitalize',
+  },
+  tapToViewText: {
+    fontSize: 10,
+    color: '#007AFF',
+    marginTop: 2,
+    fontWeight: '500',
   },
   noProjectsText: {
     fontSize: 14,

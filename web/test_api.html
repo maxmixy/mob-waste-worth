@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Test - Profile Image</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-section h3 {
+            color: #007AFF;
+            margin-bottom: 15px;
+        }
+        button {
+            background-color: #007AFF;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 API Test - Profile Image Endpoints</h1>
+        
+        <div class="test-section">
+            <h3>Test User ID</h3>
+            <input type="text" id="userId" placeholder="Enter user ID (e.g., test_user_123)" value="test_user_123">
+        </div>
+
+        <div class="test-section">
+            <h3>GET Profile Image</h3>
+            <p>Test getting a user's profile image URL</p>
+            <button onclick="testGetImage()">Test GET</button>
+            <div id="getResult" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>DELETE Profile Image</h3>
+            <p>Test deleting a user's profile image</p>
+            <button onclick="testDeleteImage()">Test DELETE</button>
+            <div id="deleteResult" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test URL Structure</h3>
+            <p>Test if the URL rewriting is working correctly</p>
+            <button onclick="testUrlStructure()">Test URL</button>
+            <div id="urlResult" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const baseUrl = 'https://red-goat-592690.hostingersite.com/web';
+        
+        function getUserId() {
+            return document.getElementById('userId').value || 'test_user_123';
+        }
+        
+        function showResult(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.style.display = 'block';
+            element.className = `result ${isError ? 'error' : 'success'}`;
+            element.textContent = JSON.stringify(data, null, 2);
+        }
+        
+        async function testGetImage() {
+            const userId = getUserId();
+            const url = `${baseUrl}/user/${userId}/profile-image`;
+            
+            try {
+                console.log('Testing GET:', url);
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                
+                const data = await response.json();
+                showResult('getResult', {
+                    url: url,
+                    status: response.status,
+                    response: data
+                }, !response.ok);
+            } catch (error) {
+                showResult('getResult', {
+                    url: url,
+                    error: error.message
+                }, true);
+            }
+        }
+        
+        async function testDeleteImage() {
+            const userId = getUserId();
+            const url = `${baseUrl}/user/${userId}/profile-image`;
+            
+            try {
+                console.log('Testing DELETE:', url);
+                const response = await fetch(url, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                
+                const data = await response.json();
+                showResult('deleteResult', {
+                    url: url,
+                    status: response.status,
+                    response: data
+                }, !response.ok);
+            } catch (error) {
+                showResult('deleteResult', {
+                    url: url,
+                    error: error.message
+                }, true);
+            }
+        }
+        
+        async function testUrlStructure() {
+            const userId = getUserId();
+            const testUrls = [
+                `${baseUrl}/user/${userId}/profile-image`,
+                `${baseUrl}/user_profile_image.php`,
+                `${baseUrl}/list_images.php`,
+                `${baseUrl}/upload_image.php`
+            ];
+            
+            const results = [];
+            
+            for (const url of testUrls) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    
+                    results.push({
+                        url: url,
+                        status: response.status,
+                        accessible: response.ok
+                    });
+                } catch (error) {
+                    results.push({
+                        url: url,
+                        error: error.message,
+                        accessible: false
+                    });
+                }
+            }
+            
+            showResult('urlResult', {
+                message: 'URL Structure Test Results',
+                results: results
+            });
+        }
+    </script>
+</body>
+</html>

@@ -21,51 +21,65 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: '#8B4513',
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
-        tabBarStyle: Platform.select({
-          ios: {
-            // Use a transparent background on iOS to show the blur effect
-            position: 'absolute',
+        tabBarShowLabel: false,
+        tabBarStyle: {
+          position: 'absolute',
+          bottom: 20,
+          left: 20,
+          right: 20,
+          height: 65,
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          borderRadius: 32.5,
+          borderTopWidth: 0,
+          borderWidth: 1,
+          borderColor: 'rgba(0, 0, 0, 0.1)',
+          shadowColor: '#000',
+          shadowOffset: {
+            width: 0,
+            height: 4,
           },
-          default: {},
-        }),
+          shadowOpacity: 0.15,
+          shadowRadius: 12,
+          elevation: 8,
+          paddingBottom: 14,
+          paddingTop: 14,
+        },
+        tabBarIconStyle: {
+          marginTop: 0,
+        },
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={32} name="house.fill" color={color} />,
         }}
       />
       <Tabs.Screen
         name="history"
         options={{
-          title: 'History',
-          tabBarIcon: ({ color }) => <FontAwesome5 name="history" size={28} color={color} />,
+          tabBarIcon: ({ color }) => <FontAwesome5 name="history" size={32} color={color} />,
         }}
       />
       <Tabs.Screen
         name="scan"
         options={{
-          title: 'Scan',
-          tabBarIcon: ({ color }) => <MaterialCommunityIcons name="cube-scan" size={28} color={color} />,
+          tabBarIcon: ({ color }) => <MaterialCommunityIcons name="cube-scan" size={32} color={color} />,
         }}
       />
       <Tabs.Screen
         name="community"
         options={{
-          title: 'Community',
-          tabBarIcon: ({ color }) => <FontAwesome6 name="people-group" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <FontAwesome6 name="people-group" size={30} color={color} />,
         }}
       />
       <Tabs.Screen
         name="quests"
         options={{
-          title: 'Quests',
-          tabBarIcon: ({ color }) => <FontAwesome5 name="scroll" size={24} color={color} />,
+          tabBarIcon: ({ color }) => <FontAwesome5 name="scroll" size={30} color={color} />,
         }}
       />
     </Tabs>

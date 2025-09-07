@@ -26,6 +26,9 @@ export default function RootLayout() {
         <Stack.Screen name="(login)/profile" options={{ headerShown: false }} />
         <Stack.Screen name="(login)/profile-settings" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="pages/project-detail" options={{ headerShown: false }} />
+        <Stack.Screen name="pages/detail" options={{ headerShown: false }} />
+        <Stack.Screen name="pages/about" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />

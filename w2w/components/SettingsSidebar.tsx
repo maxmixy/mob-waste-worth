@@ -167,8 +167,7 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
 
   const handleAbout = () => {
     onClose();
-    // Navigate to about page if you have one
-    // router.push('/(settings)/about');
+    router.push('/pages/about');
   };
 
   return (

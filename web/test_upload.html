@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        input[type="file"] {
+            padding: 5px;
+        }
+        button {
+            background-color: #007AFF;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .preview {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .preview img {
+            max-width: 200px;
+            max-height: 200px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖼️ Image Upload Test</h1>
+        
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="userId">User ID (optional):</label>
+                <input type="text" id="userId" name="user_id" placeholder="Enter user ID or leave blank">
+            </div>
+            
+            <div class="form-group">
+                <label for="imageFile">Select Image:</label>
+                <input type="file" id="imageFile" name="image" accept="image/*" required>
+            </div>
+            
+            <button type="submit" id="uploadBtn">Upload Image</button>
+        </form>
+        
+        <div class="loading" id="loading">
+            <p>⏳ Uploading and processing image...</p>
+        </div>
+        
+        <div class="result" id="result"></div>
+        
+        <div class="preview" id="preview"></div>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            const userId = document.getElementById('userId').value;
+            const imageFile = document.getElementById('imageFile').files[0];
+            
+            if (!imageFile) {
+                showResult('Please select an image file.', 'error');
+                return;
+            }
+            
+            // Add user ID if provided
+            if (userId) {
+                formData.append('user_id', userId);
+            }
+            formData.append('image', imageFile);
+            
+            // Show loading state
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('preview').innerHTML = '';
+            
+            try {
+                const response = await fetch('upload_image.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showResult(`
+                        <strong>✅ Upload Successful!</strong><br>
+                        <strong>Filename:</strong> ${data.filename}<br>
+                        <strong>Original Size:</strong> ${data.originalSize.width} × ${data.originalSize.height}px<br>
+                        <strong>Processed Size:</strong> ${data.processedSize.width} × ${data.processedSize.height}px<br>
+                        <strong>File Size:</strong> ${(data.fileSize / 1024).toFixed(1)} KB<br>
+                        <strong>Uploaded:</strong> ${data.uploadedAt}
+                    `, 'success');
+                    
+                    // Show preview
+                    const preview = document.getElementById('preview');
+                    preview.innerHTML = `
+                        <h3>Preview:</h3>
+                        <img src="${data.imageUrl}" alt="Uploaded Image">
+                        <p><strong>Image URL:</strong> <a href="${data.imageUrl}" target="_blank">${data.imageUrl}</a></p>
+                    `;
+                } else {
+                    showResult(`<strong>❌ Upload Failed:</strong> ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showResult(`<strong>❌ Network Error:</strong> ${error.message}`, 'error');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = false;
+            }
+        });
+        
+        function showResult(message, type) {
+            const result = document.getElementById('result');
+            result.innerHTML = message;
+            result.className = `result ${type}`;
+            result.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

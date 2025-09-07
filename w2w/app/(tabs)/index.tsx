@@ -1,8 +1,8 @@
 import { Image } from 'expo-image';
-import { StyleSheet, View, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Pressable } from 'react-native';
 import { useState, useEffect } from 'react';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { ScrollView as RNScrollView } from 'react-native';
@@ -12,6 +12,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
+import { ImageService } from '@/lib/imageService';
 import SettingsSidebar from '@/components/SettingsSidebar';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
@@ -54,12 +55,14 @@ interface CurrentProjectData {
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
+  const params = useLocalSearchParams();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [userMaterials, setUserMaterials] = useState<MaterialData[]>([]);
   const [userProjects, setUserProjects] = useState<ProjectData[]>([]);
   const [currentProject, setCurrentProject] = useState<CurrentProjectData | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('User');
@@ -101,13 +104,154 @@ export default function HomeScreen() {
   };
 
   // Fetch current project details
-  const fetchCurrentProject = async (projectId: string) => {
+  const fetchCurrentProject = async (userId: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/recycling/${projectId}`);
+      const response = await fetch(`${API_BASE_URL}/user/${userId}/current-project`);
       if (!response.ok) throw new Error('Failed to fetch current project');
-      return await response.json();
+      const data = await response.json();
+      return data.current_project; // Return the project data or null
     } catch (error) {
       console.error('Error fetching current project:', error);
+      return null;
+    }
+  };
+
+  // Navigate to project detail page
+  const navigateToProjectDetail = (projectId: string) => {
+    router.push(`/pages/project-detail?projectId=${projectId}`);
+  };
+
+  // Navigate to material detail page
+  const navigateToMaterialDetail = (materialId: string) => {
+    router.push(`/pages/detail?materialId=${materialId}`);
+  };
+
+  // Refresh current project data
+  const refreshCurrentProject = async (userId: string) => {
+    try {
+      const currentProjectData = await fetchCurrentProject(userId);
+      if (currentProjectData && currentProjectData.project_name) {
+        setCurrentProject(currentProjectData);
+      } else {
+        setCurrentProject(null);
+      }
+    } catch (error) {
+      console.error('Error refreshing current project:', error);
+    }
+  };
+
+  // Initialize user profile with default values (frontend only)
+  const initializeUserProfile = async (userId: string) => {
+    try {
+      console.log('🔧 Initializing user profile with default values (frontend)...');
+      const defaultProfile = {
+        name: 'User',
+        achievement_title: 'Recycling Beginner',
+        progress: 0,
+        Materials: []
+      };
+      
+      // Since backend doesn't have PUT endpoint, we'll set defaults in frontend
+      console.log('🔧 Setting default profile data in frontend state');
+      setUserData(defaultProfile);
+      setUserName(defaultProfile.name);
+      
+      return defaultProfile;
+    } catch (error) {
+      console.error('🔧 Error initializing user profile:', error);
+      return null;
+    }
+  };
+
+  // Refresh user profile data (name, title, progress)
+  const refreshUserProfile = async () => {
+    try {
+      const userId = await getUserId();
+      if (userId) {
+        console.log('🔄 Refreshing user profile data...');
+        const userDataResponse = await fetchUserProfileData(userId);
+        
+        if (userDataResponse) {
+          console.log('🔄 Updated user profile data:', {
+            name: userDataResponse.name,
+            title: userDataResponse.achievement_title,
+            progress: userDataResponse.progress
+          });
+          setUserData(userDataResponse);
+          setUserName(userDataResponse.name || 'User');
+        } else {
+          // If no data found, try to initialize
+          console.log('🔄 No user data found, initializing...');
+          const initializedData = await initializeUserProfile(userId);
+          if (initializedData) {
+            setUserData(initializedData);
+            setUserName(initializedData.name);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('🔄 Error refreshing user profile:', error);
+    }
+  };
+
+  // Load profile image from web server
+  const loadProfileImage = async (userId: string) => {
+    try {
+      console.log('🖼️ Loading profile image for user:', userId);
+      const imageResponse = await ImageService.getProfileImage(userId);
+      console.log('🖼️ Image response:', imageResponse);
+      
+      if (imageResponse.success && imageResponse.hasImage && imageResponse.imageUrl) {
+        console.log('🖼️ Setting profile image URL:', imageResponse.imageUrl);
+        setProfileImageUrl(imageResponse.imageUrl);
+      } else {
+        console.log('🖼️ No profile image found or error:', imageResponse.error || imageResponse.message);
+        setProfileImageUrl(null);
+      }
+    } catch (error) {
+      console.error('🖼️ Error loading profile image:', error);
+      setProfileImageUrl(null);
+    }
+  };
+
+  // Fetch user profile data (name, title, progress)
+  const fetchUserProfileData = async (userId: string) => {
+    try {
+      console.log('👤 Fetching user profile data for:', userId);
+      const response = await fetch(`${API_BASE_URL}/user/${userId}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch user data: ${response.status}`);
+      }
+      
+      const userData = await response.json();
+      console.log('👤 Raw user data from API:', userData);
+      console.log('👤 User profile data received:', {
+        name: userData.name,
+        achievement_title: userData.achievement_title,
+        progress: userData.progress,
+        materials_count: userData.Materials?.length || 0
+      });
+      
+      // Check if we need to initialize default values
+      if (!userData.name || !userData.achievement_title || userData.progress === undefined) {
+        console.log('👤 Missing profile data, initializing defaults...');
+        
+        // Initialize with default values if missing
+        const updatedUserData = {
+          ...userData,
+          name: userData.name || 'User',
+          achievement_title: userData.achievement_title || 'Recycling Beginner',
+          progress: userData.progress !== undefined ? userData.progress : 0
+        };
+        
+        console.log('👤 Updated user data with defaults:', updatedUserData);
+        return updatedUserData;
+      }
+      
+      return userData;
+    } catch (error) {
+      console.error('👤 Error fetching user profile data:', error);
       return null;
     }
   };
@@ -125,37 +269,55 @@ export default function HomeScreen() {
           return;
         }
 
-        // Fetch user's materials, current project, and profile
+        // Fetch user's materials, profile data, and profile completion info
         const [userMaterialsData, userDataResponse, profileInfo] = await Promise.all([
           fetchUserMaterials(userId),
-          fetch(`${API_BASE_URL}/user/${userId}`).then(res => res.ok ? res.json() : null),
+          fetchUserProfileData(userId),
           checkProfileCompletion(userId)
         ]);
         
-        // Set user data
+        // Set user data with enhanced logging
         if (userDataResponse) {
+          console.log('👤 Setting user data:', {
+            name: userDataResponse.name,
+            title: userDataResponse.achievement_title,
+            progress: userDataResponse.progress
+          });
           setUserData(userDataResponse);
           setUserName(userDataResponse.name || 'User');
+        } else {
+          // If no user data found, try to initialize with defaults
+          console.log('👤 No user data found, initializing with defaults...');
+          const initializedData = await initializeUserProfile(userId);
+          if (initializedData) {
+            setUserData(initializedData);
+            setUserName(initializedData.name);
+          }
         }
         
-        // Set profile data
+        // Set profile data (from profile completion check)
         if (profileInfo.profileCompleted && profileInfo.profileData) {
+          console.log('👤 Profile completion data found:', profileInfo.profileData);
           setUserProfile(profileInfo.profileData);
-          setUserName(`${profileInfo.profileData.firstName} ${profileInfo.profileData.lastName}`);
+          // Use profile completion name if available, otherwise keep userData name
+          if (profileInfo.profileData.firstName && profileInfo.profileData.lastName) {
+            setUserName(`${profileInfo.profileData.firstName} ${profileInfo.profileData.lastName}`);
+          }
         }
         
         // Fetch current project if user has one
-        if (userDataResponse && userDataResponse.Current_project) {
-          try {
-            const currentProjectData = await fetchCurrentProject(userDataResponse.Current_project);
-            if (currentProjectData && currentProjectData.project_name) {
-              setCurrentProject(currentProjectData);
-            }
-          } catch (error) {
-            console.error('Error fetching current project:', error);
-            // Continue without current project if there's an error
+        try {
+          const currentProjectData = await fetchCurrentProject(userId);
+          if (currentProjectData && currentProjectData.project_name) {
+            setCurrentProject(currentProjectData);
           }
+        } catch (error) {
+          console.error('Error fetching current project:', error);
+          // Continue without current project if there's an error
         }
+
+        // Load profile image
+        await loadProfileImage(userId);
         
         if (userMaterialsData.length > 0) {
           // Fetch details for each material
@@ -186,6 +348,24 @@ export default function HomeScreen() {
 
     loadUserData();
   }, []);
+
+  // Handle refresh parameter
+  useEffect(() => {
+    const handleRefresh = async () => {
+      if (params.refresh === 'true') {
+        try {
+          const userId = await getUserId();
+          if (userId) {
+            await refreshCurrentProject(userId);
+          }
+        } catch (error) {
+          console.error('Error handling refresh:', error);
+        }
+      }
+    };
+
+    handleRefresh();
+  }, [params.refresh]);
 
   if (loading) {
     return (
@@ -238,7 +418,11 @@ export default function HomeScreen() {
                   </Pressable>
                 </ThemedText>
                 
-                <View style={styles.currentProjectCard}>
+                <TouchableOpacity 
+                  style={styles.currentProjectCard}
+                  onPress={() => navigateToProjectDetail(currentProject.id)}
+                  activeOpacity={0.7}
+                >
                   <Image
                     source={currentProject.project_image ? { uri: currentProject.project_image } : require('@/assets/images/partial-react-logo.png')}
                     style={styles.currentProjectImage}
@@ -251,11 +435,14 @@ export default function HomeScreen() {
                     <ThemedText style={styles.currentProjectMaterial}>
                       Material: {currentProject.material_name || 'Unknown Material'}
                     </ThemedText>
-                                          <ThemedText style={styles.currentProjectSteps}>
-                        {currentProject.steps?.length || 0} steps to complete
-                      </ThemedText>
+                    <ThemedText style={styles.currentProjectSteps}>
+                      {currentProject.steps?.length || 0} steps to complete
+                    </ThemedText>
+                    <ThemedText style={styles.tapToViewText}>
+                      Tap to view details →
+                    </ThemedText>
                   </View>
-                </View>
+                </TouchableOpacity>
               </ThemedView>
               <View style={styles.divider} />
             </>
@@ -283,7 +470,12 @@ export default function HomeScreen() {
             <View style={styles.materialsContainer}>
               {userMaterials.length > 0 ? (
                 userMaterials.slice(-3).map((material, index) => (
-                  <View key={material.id} style={styles.materialCard}>
+                  <TouchableOpacity 
+                    key={material.id} 
+                    style={styles.materialCard}
+                    onPress={() => navigateToMaterialDetail(material.id)}
+                    activeOpacity={0.7}
+                  >
                     <Image
                       source={material.imageUrl ? { uri: material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
                       style={styles.materialCardImage}
@@ -295,8 +487,11 @@ export default function HomeScreen() {
                         {material.Traits.slice(0, 3).join(', ')}
                         {material.Traits.length > 3 ? '...' : ''}
                       </ThemedText>
+                      <ThemedText style={styles.tapToViewText}>
+                        Tap to view details →
+                      </ThemedText>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 ))
               ) : (
                 <View style={styles.emptyState}>
@@ -314,21 +509,67 @@ export default function HomeScreen() {
             lightColor={Colors.light.background}
             darkColor={Colors.dark.background}
           >
-            <ThemedText type="subtitle">Profile</ThemedText>
-            <View style={styles.profileCard}>
+            <View style={styles.profileSectionHeader}>
+              <ThemedText type="subtitle">Profile</ThemedText>
+              <View style={styles.profileHeaderActions}>
+                {(!userData?.name || !userData?.achievement_title || userData?.progress === undefined) && (
+                  <Pressable
+                    style={styles.initializeButton}
+                    onPress={async () => {
+                      const userId = await getUserId();
+                      if (userId) {
+                        await initializeUserProfile(userId);
+                        await refreshUserProfile();
+                      }
+                    }}
+                  >
+                    <MaterialIcons name="add-circle" size={16} color="#007AFF" />
+                  </Pressable>
+                )}
+                <MaterialIcons name="refresh" size={16} color="#666" />
+              </View>
+            </View>
+            <Pressable 
+              style={styles.profileCard}
+              onPress={refreshUserProfile}
+            >
               <View style={styles.profileHeader}>
-                <Image
-                  source={userData?.profile_image ? { uri: userData.profile_image } : require('@/assets/images/partial-react-logo.png')}
-                  style={styles.profileImage}
-                  resizeMode="cover"
-                />
+                <Pressable 
+                  style={styles.profileImageContainer}
+                  onPress={async () => {
+                    const userId = await getUserId();
+                    if (userId) {
+                      await loadProfileImage(userId);
+                    }
+                  }}
+                >
+                  <Image
+                    source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
+                    style={styles.profileImage}
+                    resizeMode="cover"
+                  />
+                  {profileImageUrl && (
+                    <View style={styles.imageSourceIndicator}>
+                      <MaterialIcons 
+                        name={profileImageUrl.startsWith('http') ? 'cloud-done' : 'phone-android'} 
+                        size={12} 
+                        color="white" 
+                      />
+                    </View>
+                  )}
+                </Pressable>
                 <View style={styles.profileInfo}>
                   <ThemedText type="defaultSemiBold" style={styles.profileName}>
-                    {userData?.name || 'User'}
+                    {userData?.name || userName || 'User'}
                   </ThemedText>
                   <ThemedText style={styles.achievementTitle}>
                     {userData?.achievement_title || 'Recycling Beginner'}
                   </ThemedText>
+                  {(!userData?.name || !userData?.achievement_title || userData?.progress === undefined) && (
+                    <ThemedText style={styles.profileHint}>
+                      Tap the + icon to initialize your profile
+                    </ThemedText>
+                  )}
                 </View>
               </View>
               <View style={styles.progressSection}>
@@ -346,7 +587,7 @@ export default function HomeScreen() {
                   </ThemedText>
                 </View>
               </View>
-            </View>
+            </Pressable>
           </ThemedView>
         </View>
       </View>
@@ -546,21 +787,47 @@ const styles = StyleSheet.create({
     color: '#888',
     fontStyle: 'italic',
   },
+  profileSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  profileHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  initializeButton: {
+    padding: 4,
+  },
   profileCard: {
     backgroundColor: '#f8f8f8',
     borderRadius: 12,
     padding: 20,
+    opacity: 1,
   },
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
   },
+  profileImageContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
   profileImage: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    marginRight: 16,
+  },
+  imageSourceIndicator: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 10,
+    padding: 2,
   },
   profileInfo: {
     flex: 1,
@@ -574,6 +841,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     fontStyle: 'italic',
+  },
+  profileHint: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
   progressSection: {
     marginTop: 10,
@@ -655,5 +928,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#555',
     lineHeight: 16,
+  },
+  tapToViewText: {
+    fontSize: 12,
+    color: '#007AFF',
+    marginTop: 8,
+    fontWeight: '500',
   },
 });

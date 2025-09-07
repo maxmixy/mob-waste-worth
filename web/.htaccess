@@ -1,0 +1,20 @@
+RewriteEngine On
+
+# Handle profile image API routes
+RewriteRule ^user/([^/]+)/profile-image$ user_profile_image.php [QSA,L]
+
+# Handle general upload routes
+RewriteRule ^upload$ upload_image.php [QSA,L]
+
+# Handle list images route
+RewriteRule ^list$ list_images.php [QSA,L]
+
+# Enable CORS for all requests
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+Header always set Access-Control-Max-Age "86400"
+
+# Handle preflight OPTIONS requests
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^(.*)$ $1 [R=200,L]

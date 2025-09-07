@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
+import { ImageService } from '@/lib/imageService';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import SettingsSidebar from '@/components/SettingsSidebar';
 
@@ -40,6 +41,7 @@ export default function QuestsScreen() {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [userStats, setUserStats] = useState<UserStats>({
     totalPoints: 0,
     level: 'Eco Beginner',
@@ -129,6 +131,26 @@ export default function QuestsScreen() {
     }
   };
 
+  // Load profile image from web server
+  const loadProfileImage = async (userId: string) => {
+    try {
+      console.log('🖼️ Loading profile image for user:', userId);
+      const imageResponse = await ImageService.getProfileImage(userId);
+      console.log('🖼️ Image response:', imageResponse);
+      
+      if (imageResponse.success && imageResponse.hasImage && imageResponse.imageUrl) {
+        console.log('🖼️ Setting profile image URL:', imageResponse.imageUrl);
+        setProfileImageUrl(imageResponse.imageUrl);
+      } else {
+        console.log('🖼️ No profile image found or error:', imageResponse.error || imageResponse.message);
+        setProfileImageUrl(null);
+      }
+    } catch (error) {
+      console.error('🖼️ Error loading profile image:', error);
+      setProfileImageUrl(null);
+    }
+  };
+
   const categories = [
     { id: 'all', name: 'All', icon: 'apps' },
     { id: 'scanning', name: 'Scanning', icon: 'camera-alt' },
@@ -154,12 +176,15 @@ export default function QuestsScreen() {
           setUserProfile(profileInfo.profileData);
         }
 
-        // Fetch quests and user progress in parallel
+        // Fetch quests, user progress, and profile image in parallel
         const [questsData, userProgress, userStatsData] = await Promise.all([
           fetchQuests(),
           fetchUserProgress(userId),
           fetchUserStats(userId)
         ]);
+
+        // Load profile image
+        await loadProfileImage(userId);
 
         // Merge quests with user progress
         const questsWithProgress = questsData.map(quest => {
@@ -217,6 +242,13 @@ export default function QuestsScreen() {
     }
   };
 
+  const refreshProfileImage = async () => {
+    const userId = await getUserId();
+    if (userId) {
+      await loadProfileImage(userId);
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
@@ -253,13 +285,25 @@ export default function QuestsScreen() {
         {/* User Stats */}
         <ThemedView style={styles.statsContainer}>
           <View style={styles.userInfo}>
-            <View style={styles.userImageContainer}>
+            <Pressable 
+              style={styles.userImageContainer}
+              onPress={refreshProfileImage}
+            >
               <Image
-                source={require('@/assets/images/partial-react-logo.png')}
+                source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
                 style={styles.userImage}
                 resizeMode="cover"
               />
-            </View>
+              {profileImageUrl && (
+                <View style={styles.imageSourceIndicator}>
+                  <MaterialIcons 
+                    name={profileImageUrl.startsWith('http') ? 'cloud-done' : 'phone-android'} 
+                    size={10} 
+                    color="white" 
+                  />
+                </View>
+              )}
+            </Pressable>
             <View style={styles.userDetails}>
               <ThemedText style={styles.userName}>
                 {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : 'User'}
@@ -446,10 +490,19 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     overflow: 'hidden',
     marginRight: 16,
+    position: 'relative',
   },
   userImage: {
     width: 60,
     height: 60,
+  },
+  imageSourceIndicator: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 8,
+    padding: 2,
   },
   userDetails: {
     flex: 1,
