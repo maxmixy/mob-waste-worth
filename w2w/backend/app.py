@@ -5,6 +5,7 @@ import tempfile
 import random
 import uuid
 import hashlib
+import requests
 from datetime import datetime
 from PIL import Image
 from flask import Flask, request, jsonify
@@ -59,17 +60,25 @@ from google import genai
 from google.genai import types
 
 client = genai.Client(api_key="AIzaSyDRT3lI3JrVKvg41ZbIp1l2Hibilae7EWU")
+
+# Unsplash API setup
+UNSPLASH_ACCESS_KEY = "1iBibObcGpjQYY_WbLkzlqZNIJ5I0AGoCMYu4o2JHec"  # Replace with your actual access key
+UNSPLASH_BASE_URL = "https://api.unsplash.com"
+
 app = Flask(__name__)
 CORS(app)  # allow all origins for development; tighten in production
 
 # Image upload configuration
 UPLOAD_FOLDER = 'uploads/profile_images'
+POST_IMAGES_FOLDER = 'uploads/posts'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 PROFILE_IMAGE_SIZE = (400, 400)  # Standard profile image size
+POST_IMAGE_SIZE = (800, 600)  # Standard post image size
 
-# Ensure upload directory exists
+# Ensure upload directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(POST_IMAGES_FOLDER, exist_ok=True)
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -81,6 +90,13 @@ def generate_unique_filename(user_id, original_filename):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     extension = original_filename.rsplit('.', 1)[1].lower()
     return f"{user_id}_{timestamp}.{extension}"
+
+def generate_unique_post_filename(original_filename):
+    """Generate a unique filename for post images"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    random_id = str(uuid.uuid4())[:8]
+    extension = original_filename.rsplit('.', 1)[1].lower()
+    return f"post_{timestamp}_{random_id}.{extension}"
 
 def process_profile_image(image_path):
     """Process and resize profile image"""
@@ -110,6 +126,193 @@ def process_profile_image(image_path):
         print(f"Error processing image: {e}")
         return False
 
+def process_post_image(image_path):
+    """Process and resize post image"""
+    try:
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary (handles RGBA, P mode, etc.)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Resize image while maintaining aspect ratio
+            img.thumbnail(POST_IMAGE_SIZE, Image.Resampling.LANCZOS)
+            
+            # Save the processed image
+            img.save(image_path, 'JPEG', quality=85, optimize=True)
+            return True
+    except Exception as e:
+        print(f"Error processing post image: {e}")
+        return False
+
+def search_unsplash_for_material(material_name, num_images=3):
+    """Search Unsplash for images related to the material"""
+    try:
+        print(f"[Unsplash API] Starting search for material: '{material_name}' (requesting {num_images} images)")
+        if not UNSPLASH_ACCESS_KEY or UNSPLASH_ACCESS_KEY == "YOUR_UNSPLASH_ACCESS_KEY":
+            print("[Unsplash API] API key not configured, skipping image search")
+            return None
+            
+        # Clean up material name for better search results
+        search_query = material_name.lower().strip()
+        
+        # Add recycling/waste context to improve search results
+        search_terms = [
+            f"{search_query} recycling",
+            f"{search_query} waste",
+            f"{search_query} material",
+            search_query
+        ]
+        
+        headers = {
+            'Authorization': f'Client-ID {UNSPLASH_ACCESS_KEY}'
+        }
+        
+        # Try different search terms until we find a good result
+        for i, term in enumerate(search_terms):
+            try:
+                print(f"[Unsplash API] Trying search term {i+1}/{len(search_terms)}: '{term}'")
+                response = requests.get(
+                    f"{UNSPLASH_BASE_URL}/search/photos",
+                    params={
+                        'query': term,
+                        'per_page': num_images,
+                        'orientation': 'landscape'
+                    },
+                    headers=headers,
+                    timeout=5
+                )
+                
+                print(f"[Unsplash API] Response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"[Unsplash API] Response data keys: {list(data.keys())}")
+                    print(f"[Unsplash API] Results count: {len(data.get('results', []))}")
+                    
+                    if data.get('results') and len(data['results']) > 0:
+                        images = []
+                        for j, photo in enumerate(data['results'][:num_images]):
+                            print(f"[Unsplash API] Photo {j+1} data keys: {list(photo.keys())}")
+                            print(f"[Unsplash API] Photo {j+1} URLs keys: {list(photo.get('urls', {}).keys())}")
+                            
+                            image_data = {
+                                'url': photo['urls']['regular'],
+                                'thumb': photo['urls']['thumb'],
+                                'alt_description': photo.get('alt_description', ''),
+                                'description': photo.get('description', ''),
+                                'photographer': photo.get('user', {}).get('name', 'Unknown'),
+                                'photographer_url': photo.get('user', {}).get('links', {}).get('html', ''),
+                                'unsplash_url': photo.get('links', {}).get('html', '')
+                            }
+                            images.append(image_data)
+                            print(f"[Unsplash API] Image {j+1} URL: {image_data['url']}")
+                        
+                        print(f"[Unsplash API] ✅ Found {len(images)} images for '{material_name}' using search term '{term}'")
+                        return images
+                    else:
+                        print(f"[Unsplash API] No results found for search term: '{term}'")
+                        print(f"[Unsplash API] Response data: {data}")
+                else:
+                    print(f"[Unsplash API] API error {response.status_code} for search term: '{term}'")
+                    print(f"[Unsplash API] Error response: {response.text}")
+                        
+            except requests.RequestException as e:
+                print(f"[Unsplash API] ❌ Request error for '{term}': {e}")
+                continue
+                
+        print(f"[Unsplash API] ❌ No images found for material: {material_name}")
+        return None
+        
+    except Exception as e:
+        print(f"Error in search_unsplash_for_material: {e}")
+        return None
+
+def ensure_material_has_image_url_field(material_doc, db):
+    """Ensure a material document has the ImageUrl field, add it if missing, and fill it if empty"""
+    try:
+        data = material_doc.to_dict()
+        doc_id = material_doc.id
+        material_name = data.get('Name', '')
+        
+        # Check if ImageUrl field exists
+        if 'ImageUrl' not in data:
+            print(f"[Image Field] Adding missing ImageUrl field to material document: {doc_id}")
+            material_doc.reference.update({'ImageUrl': ''})
+            data['ImageUrl'] = ''
+            print(f"[Image Field] ✅ Added ImageUrl field to document: {doc_id}")
+        else:
+            print(f"[Image Field] ImageUrl field already exists in document: {doc_id}")
+        
+        # Check if ImageUrl is empty and try to fill it with Unsplash image
+        if not data.get('ImageUrl') or not data.get('ImageUrl').strip():
+            print(f"[Image Field] ImageUrl is empty for material '{material_name}', attempting to fill with Unsplash image...")
+            if material_name:
+                images = search_unsplash_for_material(material_name)
+                if images and len(images) > 0:
+                    # Use the first image as default for existing materials
+                    image_url = images[0]['url']
+                    print(f"[Image Field] ✅ Found Unsplash image for '{material_name}': {image_url}")
+                    material_doc.reference.update({'ImageUrl': image_url})
+                    data['ImageUrl'] = image_url
+                    print(f"[Image Field] ✅ Updated document {doc_id} with image URL")
+                else:
+                    print(f"[Image Field] ❌ No Unsplash images found for '{material_name}'")
+            else:
+                print(f"[Image Field] ❌ No material name available for image search")
+            
+        return data
+        
+    except Exception as e:
+        print(f"[Image Field] Error ensuring ImageUrl field: {e}")
+        return material_doc.to_dict()
+
+def get_or_create_material_image_url(material_name, db):
+    """Get existing image URL for material or create new one via Unsplash search"""
+    try:
+        print(f"[Image Cache] Checking cache for material: '{material_name}'")
+        if not db:
+            print("[Image Cache] ❌ Database not available")
+            return None
+            
+        # First, check if we already have a valid image URL for this material name
+        materials_with_image = db.collection('Materials').where('Name', '==', material_name).where('ImageUrl', '!=', '').limit(1).stream()
+        
+        for doc in materials_with_image:
+            data = doc.to_dict()
+            if data.get('ImageUrl') and data.get('ImageUrl').strip():  # Check for non-empty string
+                print(f"[Image Cache] ✅ Found cached image URL for '{material_name}': {data['ImageUrl']}")
+                print(f"[Image Cache] Image source: {'Unsplash API' if 'unsplash' in data['ImageUrl'] else 'Other'}")
+                return data['ImageUrl']
+        
+        # If no existing valid image URL, search Unsplash
+        print(f"[Image Cache] ❌ No valid cached image URL found for '{material_name}', searching Unsplash...")
+        images = search_unsplash_for_material(material_name)
+        
+        if images and len(images) > 0:
+            # For existing materials, we'll use the first image as default
+            # The user selection will be handled separately for new materials
+            image_url = images[0]['url']
+            
+            # Update all materials with this name to include the image URL
+            materials_to_update = db.collection('Materials').where('Name', '==', material_name).stream()
+            updated_count = 0
+            
+            for doc in materials_to_update:
+                doc.reference.update({'ImageUrl': image_url})
+                updated_count += 1
+                
+            print(f"[Image Cache] ✅ Updated {updated_count} materials with name '{material_name}' to include image URL")
+            print(f"[Image Cache] Cached image URL: {image_url}")
+            return image_url
+        else:
+            print(f"[Image Cache] ❌ No images found for '{material_name}'")
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error in get_or_create_material_image_url: {e}")
+        return None
+
 #Routes
 
 def _load_image_from_base64(data_str: str):
@@ -131,6 +334,148 @@ def _load_image_from_base64(data_str: str):
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
+
+
+
+@app.route('/select-material-image', methods=['POST'])
+def select_material_image():
+    """Create a material with the user's selected image"""
+    try:
+        data = request.get_json()
+        if not data or 'material_data' not in data or 'selected_image_index' not in data:
+            return jsonify({'error': 'Missing material_data or selected_image_index'}), 400
+        
+        material_data = data['material_data']
+        selected_image_index = data['selected_image_index']
+        
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Validate the material data
+        if not material_data.get('Name'):
+            return jsonify({'error': 'Invalid material data - missing name'}), 400
+        
+        # ImageOptions is required unless user selected "None Fit"
+        if selected_image_index != -1 and not material_data.get('ImageOptions'):
+            return jsonify({'error': 'Invalid material data - missing image options'}), 400
+        
+        # Handle the case where user selected "None Fit" (index -1)
+        if selected_image_index == -1:
+            image_url = ''
+            selected_image = None
+            print(f"User selected 'None Fit' for material: {material_data['Name']}")
+        else:
+            # Get the selected image
+            image_options = material_data['ImageOptions']
+            if selected_image_index < 0 or selected_image_index >= len(image_options):
+                return jsonify({'error': 'Invalid image index'}), 400
+            
+            selected_image = image_options[selected_image_index]
+            image_url = selected_image['url']
+        
+        # Create the material document
+        doc_data = {
+            'Name': material_data['Name'],
+            'Traits': material_data.get('Traits', []),
+            'ImageUrl': image_url
+        }
+        
+        doc_ref = db.collection('Materials').document()
+        doc_ref.set(doc_data)
+        inserted_doc = {**doc_data, 'id': doc_ref.id}
+        
+        print(f"Created material with selected image: {material_data['Name']} -> {image_url}")
+        
+        return jsonify({
+            'success': True,
+            'material': inserted_doc,
+            'selected_image': selected_image
+        })
+        
+    except Exception as e:
+        print(f"Error in select_material_image: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/update-empty-images', methods=['POST'])
+def update_empty_images():
+    """Update all materials with empty ImageUrl fields"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        print("[Batch Update] Starting batch update of materials with empty ImageUrl fields...")
+        
+        # Find all materials with empty ImageUrl fields
+        materials_to_update = db.collection('Materials').where('ImageUrl', '==', '').stream()
+        
+        updated_count = 0
+        failed_count = 0
+        results = []
+        
+        for doc in materials_to_update:
+            try:
+                data = doc.to_dict()
+                material_name = data.get('Name', '')
+                doc_id = doc.id
+                
+                if material_name:
+                    print(f"[Batch Update] Processing material: '{material_name}' (ID: {doc_id})")
+                    images = search_unsplash_for_material(material_name)
+                    
+                    if images and len(images) > 0:
+                        # Use the first image for batch updates
+                        image_url = images[0]['url']
+                        doc.reference.update({'ImageUrl': image_url})
+                        updated_count += 1
+                        results.append({
+                            'id': doc_id,
+                            'name': material_name,
+                            'image_url': image_url,
+                            'status': 'success'
+                        })
+                        print(f"[Batch Update] ✅ Updated '{material_name}' with image URL")
+                    else:
+                        failed_count += 1
+                        results.append({
+                            'id': doc_id,
+                            'name': material_name,
+                            'image_url': None,
+                            'status': 'no_image_found'
+                        })
+                        print(f"[Batch Update] ❌ No images found for '{material_name}'")
+                else:
+                    failed_count += 1
+                    results.append({
+                        'id': doc_id,
+                        'name': 'Unknown',
+                        'image_url': None,
+                        'status': 'no_name'
+                    })
+                    print(f"[Batch Update] ❌ No name found for document {doc_id}")
+                    
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    'id': doc.id,
+                    'name': data.get('Name', 'Unknown'),
+                    'image_url': None,
+                    'status': f'error: {str(e)}'
+                })
+                print(f"[Batch Update] ❌ Error updating document {doc.id}: {e}")
+        
+        print(f"[Batch Update] Completed: {updated_count} updated, {failed_count} failed")
+        
+        return jsonify({
+            'success': True,
+            'updated_count': updated_count,
+            'failed_count': failed_count,
+            'total_processed': len(results),
+            'results': results
+        })
+        
+    except Exception as e:
+        print(f"[Batch Update] Error in batch update: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/upload', methods=['POST'])
@@ -207,21 +552,60 @@ def upload():
         if normalized_traits:
             query = query.where('Traits', '==', normalized_traits)
         docs = query.stream()
-        materials = [{**d.to_dict(), 'id': d.id} for d in docs]
+        materials = []
+        for doc in docs:
+            # Ensure each material document has the ImageUrl field
+            material_data = ensure_material_has_image_url_field(doc, db)
+            materials.append({**material_data, 'id': doc.id})
         print("Materials found:", materials)
         if not materials:
-            doc_data = {
-                'Name': material.get('Name'),
-                'Traits': normalized_traits
-            }
-            if not doc_data['Name']:
+            material_name = material.get('Name')
+            if not material_name:
                 return jsonify({'error': 'Model did not return a Name field'}), 502
-            doc_ref = db.collection('Materials').document()
-            doc_ref.set(doc_data)
-            inserted_doc = {**doc_data, 'id': doc_ref.id}
-            print("Inserted new material:", inserted_doc)
-            return jsonify({'Scanned Material': [inserted_doc], 'inserted': True})
+            
+            # Get multiple image options for new material
+            images = search_unsplash_for_material(material_name)
+            
+            if images and len(images) > 0:
+                # Return the material with multiple image options for user selection
+                material_data = {
+                    'Name': material_name,
+                    'Traits': normalized_traits,
+                    'ImageUrl': '',  # Will be set after user selection
+                    'ImageOptions': images  # Multiple image options
+                }
+                print("New material with image options:", material_data)
+                return jsonify({
+                    'Scanned Material': [material_data], 
+                    'inserted': False,  # Not inserted yet, waiting for user selection
+                    'needs_image_selection': True
+                })
+            else:
+                # No images found, create material without image
+                doc_data = {
+                    'Name': material_name,
+                    'Traits': normalized_traits,
+                    'ImageUrl': ''
+                }
+                
+                doc_ref = db.collection('Materials').document()
+                doc_ref.set(doc_data)
+                inserted_doc = {**doc_data, 'id': doc_ref.id}
+                print("Inserted new material without image:", inserted_doc)
+                return jsonify({'Scanned Material': [inserted_doc], 'inserted': True})
 
+        # Check if any of the found materials need image URLs
+        material_name = material.get('Name')
+        if material_name:
+            # Get or create image URL for this material (this will update existing materials if needed)
+            image_url = get_or_create_material_image_url(material_name, db)
+            
+            # If we got a new image URL, update the materials in the response
+            if image_url:
+                for mat in materials:
+                    if not mat.get('ImageUrl') or not mat.get('ImageUrl').strip():
+                        mat['ImageUrl'] = image_url
+        
         return jsonify({'Scanned Material': materials, 'inserted': False})
             
     except Exception as e:
@@ -287,13 +671,20 @@ def get_material_details(material_id):
         if not material_doc.exists:
             # If not found by ID, try to find by name
             docs = db.collection('Materials').where('Name', '==', material_id).stream()
-            materials = [d.to_dict() for d in docs]
+            materials = []
+            for doc in docs:
+                # Ensure each material document has the ImageUrl field
+                material_data = ensure_material_has_image_url_field(doc, db)
+                materials.append(material_data)
+            
             if materials:
                 material_data = {**materials[0], 'id': material_id}
             else:
                 return jsonify({'error': 'Material not found'}), 404
         else:
-            material_data = {**material_doc.to_dict(), 'id': material_doc.id}
+            # Ensure the material document has the ImageUrl field
+            material_data = ensure_material_has_image_url_field(material_doc, db)
+            material_data = {**material_data, 'id': material_doc.id}
         
         return jsonify(material_data)
         
@@ -447,7 +838,8 @@ def get_related_materials(material_id):
         
         for doc in all_materials:
             if doc.id != material_id:
-                material_data = doc.to_dict()
+                # Ensure each material document has the ImageUrl field
+                material_data = ensure_material_has_image_url_field(doc, db)
                 # Check for trait overlap
                 if has_trait_overlap(current_material.get('Traits', []), material_data.get('Traits', [])):
                     related_materials.append({
@@ -982,23 +1374,38 @@ def posts():
             user_id = data.get('user_id')
             content_text = data.get('content_text')
             status = data.get('status', 'published')
+            image_paths = data.get('image_paths', [])  # Array of image paths from uploads
             
-            if not user_id or not content_text:
-                return jsonify({'error': 'Missing user_id or content_text'}), 400
+            if not user_id or (not content_text and not image_paths):
+                return jsonify({'error': 'Missing user_id or both content_text and image_paths'}), 400
             
             # Create new post document
             post_ref = db.collection('Posts').document()
             post_data = {
                 'user_id': user_id,
-                'content_text': content_text,
+                'content_text': content_text or '',
                 'status': status,
                 'created_at': datetime.utcnow(),
                 'updated_at': datetime.utcnow()
             }
             post_ref.set(post_data)
+            post_id = post_ref.id
             
-            print(f"Created new post {post_ref.id} for user {user_id}")
-            return jsonify({'success': True, 'post_id': post_ref.id, 'message': 'Post created successfully'})
+            # Create Post_Media entries for each image
+            if image_paths:
+                for index, image_path in enumerate(image_paths):
+                    media_data = {
+                        'post_id': post_id,
+                        'media_path': image_path,
+                        'media_type': 'image',
+                        'order_index': index,
+                        'created_at': datetime.utcnow()
+                    }
+                    db.collection('Post_Media').add(media_data)
+                    print(f"Created media entry for post {post_id}: {image_path}")
+            
+            print(f"Created new post {post_id} for user {user_id} with {len(image_paths)} images")
+            return jsonify({'success': True, 'post_id': post_id, 'message': 'Post created successfully'})
             
         except Exception as e:
             print(f"Error creating post: {e}")
@@ -1316,6 +1723,86 @@ def upload_profile_image(user_id):
         
     except Exception as e:
         print(f"Error uploading profile image: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/test-upload', methods=['GET', 'POST'])
+def test_upload():
+    """Test endpoint to verify upload functionality"""
+    if request.method == 'GET':
+        return jsonify({'message': 'Upload test endpoint is working', 'method': 'GET'})
+    else:
+        return jsonify({
+            'message': 'Upload test endpoint is working', 
+            'method': 'POST',
+            'files': list(request.files.keys()),
+            'form': list(request.form.keys())
+        })
+
+@app.route('/upload/post-image', methods=['POST'])
+def upload_post_image():
+    """Upload an image for a post"""
+    try:
+        print(f"POST /upload/post-image - Request method: {request.method}")
+        print(f"Request files: {list(request.files.keys())}")
+        print(f"Request form: {list(request.form.keys())}")
+        
+        # Check if file is present in request
+        if 'image' not in request.files:
+            print("Error: No 'image' field in request.files")
+            return jsonify({'error': 'No image file provided'}), 400
+        
+        file = request.files['image']
+        print(f"File received: {file.filename}, Content type: {file.content_type}")
+        
+        # Check if file is selected
+        if file.filename == '':
+            print("Error: Empty filename")
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate file
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Invalid file type. Allowed types: PNG, JPG, JPEG, GIF, WEBP'}), 400
+        
+        # Check file size
+        file.seek(0, 2)  # Seek to end
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({'error': f'File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB'}), 400
+        
+        # Generate unique filename
+        filename = generate_unique_post_filename(file.filename)
+        file_path = os.path.join(POST_IMAGES_FOLDER, filename)
+        print(f"Saving file to: {file_path}")
+        
+        # Save file
+        file.save(file_path)
+        print(f"File saved successfully: {filename}")
+        
+        # Process image (resize, optimize)
+        if not process_post_image(file_path):
+            # Clean up file if processing failed
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return jsonify({'error': 'Failed to process image'}), 500
+        
+        # Generate URL for the image
+        image_url = f"/uploads/posts/{filename}"
+        
+        print(f"Post image uploaded successfully: {filename}")
+        print(f"Image URL: {image_url}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Post image uploaded successfully',
+            'imageUrl': image_url,
+            'imagePath': image_url
+        })
+        
+    except Exception as e:
+        print(f"Error uploading post image: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -2044,6 +2531,16 @@ def serve_profile_image(filename):
         return send_from_directory(UPLOAD_FOLDER, filename)
     except Exception as e:
         print(f"Error serving image {filename}: {e}")
+        return jsonify({'error': 'Image not found'}), 404
+
+@app.route('/uploads/posts/<filename>')
+def serve_post_image(filename):
+    """Serve post images as static files"""
+    try:
+        from flask import send_from_directory
+        return send_from_directory(POST_IMAGES_FOLDER, filename)
+    except Exception as e:
+        print(f"Error serving post image {filename}: {e}")
         return jsonify({'error': 'Image not found'}), 404
 
 

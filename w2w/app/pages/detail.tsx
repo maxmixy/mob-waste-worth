@@ -9,12 +9,23 @@ const LOG_URL = 'http://127.0.0.1:5000/log';
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Types for the data structure
+interface ImageOption {
+    url: string;
+    thumb: string;
+    alt_description: string;
+    description: string;
+    photographer: string;
+    photographer_url: string;
+    unsplash_url: string;
+}
+
 interface MaterialData {
     id: string;
     Name: string;
     Traits: string[];
     imageUrl?: string;
     disposalMethods?: string;
+    ImageOptions?: ImageOption[];
 }
 
 interface RecyclingProject {
@@ -43,15 +54,129 @@ export default function DetailScreen() {
     const [populatingProjects, setPopulatingProjects] = useState(false);
     const [generatingCustomProject, setGeneratingCustomProject] = useState(false);
     const [generateError, setGenerateError] = useState<string | null>(null);
+    const [showImageSelection, setShowImageSelection] = useState(false);
+    const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+    const [isSelectingImage, setIsSelectingImage] = useState(false);
+
+    // Handle image selection for new materials
+    const handleImageSelection = async (imageIndex: number) => {
+        if (!pageData?.material) return;
+        
+        setIsSelectingImage(true);
+        try {
+            if (imageIndex === -1) {
+                // User selected "None Fit" - create material without image
+                console.log(`[Image Selection] Creating material without image: ${pageData.material.Name}`);
+                
+                const response = await fetch(`${API_BASE_URL}/select-material-image`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        material_data: pageData.material,
+                        selected_image_index: -1 // Special value for no image
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('[Image Selection] ✅ Material created successfully without image:', result.material);
+                    
+                    // Update the page data with the created material
+                    setPageData(prev => prev ? {
+                        ...prev,
+                        material: result.material
+                    } : null);
+                    
+                    setShowImageSelection(false);
+                    
+                    // Refresh the page to load the new material's details
+                    if (result.material.id) {
+                        await fetchMaterialDetails(result.material.id);
+                    }
+                } else {
+                    console.error('[Image Selection] ❌ Failed to create material:', result.error);
+                    setError(result.error || 'Failed to create material');
+                }
+            } else {
+                // User selected a specific image
+                if (!pageData.material.ImageOptions) return;
+                
+                console.log(`[Image Selection] Selecting image ${imageIndex} for material: ${pageData.material.Name}`);
+                
+                const response = await fetch(`${API_BASE_URL}/select-material-image`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        material_data: pageData.material,
+                        selected_image_index: imageIndex
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('[Image Selection] ✅ Material created successfully:', result.material);
+                    
+                    // Update the page data with the created material
+                    setPageData(prev => prev ? {
+                        ...prev,
+                        material: result.material
+                    } : null);
+                    
+                    setShowImageSelection(false);
+                    
+                    // Refresh the page to load the new material's details
+                    if (result.material.id) {
+                        await fetchMaterialDetails(result.material.id);
+                    }
+                } else {
+                    console.error('[Image Selection] ❌ Failed to create material:', result.error);
+                    setError(result.error || 'Failed to create material');
+                }
+            }
+        } catch (error) {
+            console.error('[Image Selection] ❌ Error selecting image:', error);
+            setError('Failed to select image');
+        } finally {
+            setIsSelectingImage(false);
+        }
+    };
 
     // Fetch material details and related data from backend
     const fetchMaterialDetails = async (materialId: string) => {
         try {
+            console.log(`[Material Details] Fetching material details for ID: ${materialId}`);
             const response = await fetch(`${API_BASE_URL}/material/${materialId}`);
             if (!response.ok) throw new Error('Failed to fetch material details');
-            return await response.json();
+            const data = await response.json();
+            
+            // Log material data including image information
+            if (data && data.material) {
+                console.log(`[Material Details] Material loaded:`, {
+                    id: data.material.id,
+                    name: data.material.Name,
+                    traits: data.material.Traits,
+                    hasImageUrl: !!data.material.imageUrl,
+                    imageUrl: data.material.imageUrl ? 'Present' : 'Missing',
+                    imageSource: data.material.imageUrl ? (data.material.imageUrl.includes('unsplash') ? 'Unsplash API' : 'Other') : 'None'
+                });
+                
+                if (data.material.imageUrl) {
+                    console.log(`[Material Details] Image URL found: ${data.material.imageUrl}`);
+                    console.log(`[Material Details] Image source: ${data.material.imageUrl.includes('unsplash') ? 'Unsplash API' : 'Other source'}`);
+                } else {
+                    console.log(`[Material Details] No image URL found for material: ${data.material.Name}`);
+                }
+            }
+            
+            return data;
         } catch (error) {
-            console.error('Error fetching material details:', error);
+            console.error('[Material Details] Error fetching material details:', error);
             return null;
         }
     };
@@ -361,18 +486,27 @@ export default function DetailScreen() {
     useEffect(() => {
         const loadPageData = async () => {
             try {
+                console.log('[Detail Page] Starting page data load...');
                 setLoading(true);
                 let materialId: string;
                 let material: MaterialData | null = null;
                 
                 // Handle both scanData (from scanning) and materialId (from navigation)
                 if (params.scanData) {
+                    console.log('[Detail Page] Loading from scan data...');
                     const data = JSON.parse(params.scanData as string);
                     setScanData(data);
                     
                     if (data['Scanned Material'] && data['Scanned Material'].length > 0) {
                         material = data['Scanned Material'][0];
                         materialId = material?.id || material?.Name || '';
+                        
+                        console.log('[Detail Page] Scan data material:', {
+                            id: material?.id,
+                            name: material?.Name,
+                            hasImageUrl: !!material?.imageUrl,
+                            imageUrl: material?.imageUrl ? 'Present' : 'Missing'
+                        });
                         
                         if (!materialId) {
                             throw new Error('No valid material ID found');
@@ -384,14 +518,17 @@ export default function DetailScreen() {
                         throw new Error('No scanned material data found');
                     }
                 } else if (params.materialId) {
+                    console.log('[Detail Page] Loading from material ID:', params.materialId);
                     materialId = params.materialId as string;
                 } else {
                     throw new Error('No material ID or scan data provided');
                 }
                 
+                console.log('[Detail Page] Fetching material details for ID:', materialId);
                 // Fetch material details first to get the material name
                 const materialDetails = await fetchMaterialDetails(materialId);
                 
+                console.log('[Detail Page] Fetching additional data in parallel...');
                 // Fetch remaining data in parallel
                 const [projects, disposalMethods, relatedMaterials] = await Promise.all([
                     fetchRecyclingProjects(materialId, materialDetails?.Name),
@@ -407,11 +544,32 @@ export default function DetailScreen() {
                     relatedMaterials: relatedMaterials
                 };
                 
+                console.log('[Detail Page] Page data loaded successfully:', {
+                    materialName: pageData.material.Name,
+                    hasImageUrl: !!pageData.material.imageUrl,
+                    imageSource: pageData.material.imageUrl ? (pageData.material.imageUrl.includes('unsplash') ? 'Unsplash API' : 'Other') : 'None',
+                    hasImageOptions: !!pageData.material.ImageOptions,
+                    imageOptionsCount: pageData.material.ImageOptions?.length || 0,
+                    projectsCount: pageData.recyclingProjects.length,
+                    relatedMaterialsCount: pageData.relatedMaterials.length
+                });
+                
                 setPageData(pageData);
+                
+                // Check if this is a new material that needs image selection
+                if (pageData.material.ImageOptions && pageData.material.ImageOptions.length > 0) {
+                    console.log('[Detail Page] New material detected with image options, showing selection UI');
+                    setShowImageSelection(true);
+                }
             } catch (error) {
-                console.error('Error loading page data:', error);
+                console.error('[Detail Page] Error loading page data:', error);
+                console.error('[Detail Page] Error details:', {
+                    message: error instanceof Error ? error.message : 'Unknown error',
+                    stack: error instanceof Error ? error.stack : undefined
+                });
                 setError('Failed to load material details');
             } finally {
+                console.log('[Detail Page] Page data loading completed');
                 setLoading(false);
             }
         };
@@ -445,13 +603,85 @@ export default function DetailScreen() {
     }
 
     return (
-        <ScrollView style={styles.container}>
-            {/* Back Button */}
-            <ThemedView style={styles.backButtonContainer}>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                    <ThemedText style={styles.backButtonText}>← Back</ThemedText>
-                </TouchableOpacity>
-            </ThemedView>
+        <ThemedView style={styles.container}>
+            {/* Image Selection Modal */}
+            {showImageSelection && pageData.material.ImageOptions && (
+                <ThemedView style={styles.imageSelectionModal}>
+                    <ThemedView style={styles.imageSelectionContent}>
+                        <ThemedText type="title" style={styles.imageSelectionTitle}>
+                            Choose the best image for "{pageData.material.Name}"
+                        </ThemedText>
+                        <ThemedText style={styles.imageSelectionSubtitle}>
+                            Select the image that best represents this material:
+                        </ThemedText>
+                        
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageOptionsContainer}>
+                            {pageData.material.ImageOptions.map((imageOption, index) => (
+                                <TouchableOpacity
+                                    key={index}
+                                    style={[
+                                        styles.imageOption,
+                                        selectedImageIndex === index && styles.selectedImageOption
+                                    ]}
+                                    onPress={() => setSelectedImageIndex(index)}
+                                >
+                                    <Image
+                                        source={{ uri: imageOption.thumb }}
+                                        style={styles.imageOptionThumb}
+                                        resizeMode="cover"
+                                    />
+                                    <ThemedText style={styles.imageOptionDescription} numberOfLines={2}>
+                                        {imageOption.alt_description || imageOption.description || 'Image'}
+                                    </ThemedText>
+                                    <ThemedText style={styles.imageOptionPhotographer} numberOfLines={1}>
+                                        by {imageOption.photographer}
+                                    </ThemedText>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                        
+                        <ThemedView style={styles.imageSelectionButtons}>
+                            <TouchableOpacity
+                                style={[styles.imageSelectionButton, styles.cancelButton]}
+                                onPress={() => {
+                                    setShowImageSelection(false);
+                                    router.back();
+                                }}
+                            >
+                                <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity
+                                style={[styles.imageSelectionButton, styles.skipButton]}
+                                onPress={() => handleImageSelection(-1)} // -1 indicates no image
+                                disabled={isSelectingImage}
+                            >
+                                <ThemedText style={styles.skipButtonText}>None Fit</ThemedText>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity
+                                style={[styles.imageSelectionButton, styles.confirmButton]}
+                                onPress={() => handleImageSelection(selectedImageIndex)}
+                                disabled={isSelectingImage}
+                            >
+                                {isSelectingImage ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                    <ThemedText style={styles.confirmButtonText}>Use This Image</ThemedText>
+                                )}
+                            </TouchableOpacity>
+                        </ThemedView>
+                    </ThemedView>
+                </ThemedView>
+            )}
+            
+            <ScrollView style={styles.scrollContainer}>
+                {/* Back Button */}
+                <ThemedView style={styles.backButtonContainer}>
+                    <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                        <ThemedText style={styles.backButtonText}>← Back</ThemedText>
+                    </TouchableOpacity>
+                </ThemedView>
             
             {/* Top Division */}
             <ThemedView style={styles.topDivision}>
@@ -461,6 +691,16 @@ export default function DetailScreen() {
                             source={{ uri: pageData.material.imageUrl }} 
                             style={styles.materialImage}
                             resizeMode="cover"
+                            onLoad={() => {
+                                console.log(`[Material Image] Successfully loaded image for ${pageData.material.Name}`);
+                                console.log(`[Material Image] Image URL: ${pageData.material.imageUrl || 'N/A'}`);
+                                console.log(`[Material Image] Image source: ${pageData.material.imageUrl?.includes('unsplash') ? 'Unsplash API' : 'Other source'}`);
+                            }}
+                            onError={(error) => {
+                                console.error(`[Material Image] Failed to load image for ${pageData.material.Name}:`, error);
+                                console.error(`[Material Image] Failed URL: ${pageData.material.imageUrl || 'N/A'}`);
+                                console.error(`[Material Image] Image source: ${pageData.material.imageUrl?.includes('unsplash') ? 'Unsplash API' : 'Other source'}`);
+                            }}
                         />
                     ) : (
                         <ThemedText style={styles.placeholderText}>Material Image</ThemedText>
@@ -556,14 +796,121 @@ export default function DetailScreen() {
                     {pageData.disposalMethods || 'No disposal methods available for this material.'}
                 </ThemedText>
             </ThemedView>
-        </ScrollView>
+            </ScrollView>
+        </ThemedView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f5f5f5',
+    },
+    scrollContainer: {
+        flex: 1,
+    },
+    imageSelectionModal: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        zIndex: 1000,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    imageSelectionContent: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 24,
+        margin: 20,
+        maxHeight: '80%',
+        width: '90%',
+    },
+    imageSelectionTitle: {
+        fontSize: 20,
+        fontWeight: '600',
+        color: '#333',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    imageSelectionSubtitle: {
+        fontSize: 16,
+        color: '#666',
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    imageOptionsContainer: {
+        marginBottom: 24,
+    },
+    imageOption: {
+        width: 150,
+        marginRight: 16,
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#E5E5E5',
+        backgroundColor: '#F8F9FA',
+    },
+    selectedImageOption: {
+        borderColor: '#007AFF',
+        backgroundColor: '#E3F2FD',
+    },
+    imageOptionThumb: {
+        width: '100%',
+        height: 100,
+        borderRadius: 8,
+        marginBottom: 8,
+    },
+    imageOptionDescription: {
+        fontSize: 12,
+        color: '#333',
+        marginBottom: 4,
+        textAlign: 'center',
+    },
+    imageOptionPhotographer: {
+        fontSize: 10,
+        color: '#666',
+        textAlign: 'center',
+        fontStyle: 'italic',
+    },
+    imageSelectionButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+    imageSelectionButton: {
+        flex: 1,
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    cancelButton: {
+        backgroundColor: '#F8F9FA',
+        borderWidth: 1,
+        borderColor: '#E5E5E5',
+    },
+    skipButton: {
+        backgroundColor: '#FF9500',
+    },
+    confirmButton: {
+        backgroundColor: '#007AFF',
+    },
+    cancelButtonText: {
+        color: '#666',
+        fontSize: 16,
+        fontWeight: '500',
+    },
+    skipButtonText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '500',
+    },
+    confirmButtonText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '500',
     },
     backButtonContainer: {
         paddingHorizontal: 16,

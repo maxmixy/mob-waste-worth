@@ -19,6 +19,15 @@ export interface ImageGetResponse {
   error?: string;
 }
 
+export interface PostImageUploadResponse {
+  success: boolean;
+  message: string;
+  imageUrl?: string;
+  imagePath?: string;
+  filename?: string;
+  error?: string;
+}
+
 export class ImageService {
   /**
    * Upload a profile image for a user
@@ -65,7 +74,7 @@ export class ImageService {
           }
         } catch (blobError) {
           console.error('❌ Error creating File object:', blobError);
-          throw new Error('Failed to process image for web upload: ' + blobError.message);
+          throw new Error('Failed to process image for web upload: ' + (blobError instanceof Error ? blobError.message : 'Unknown error'));
         }
       } else {
         // For mobile platforms, use the original approach
@@ -191,6 +200,75 @@ export class ImageService {
       };
     } catch (error) {
       console.error('Error deleting profile image:', error);
+      return {
+        success: false,
+        message: 'Network error',
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+
+  /**
+   * Upload a post image to Hostinger
+   */
+  static async uploadPostImage(imageUri: string): Promise<PostImageUploadResponse> {
+    try {
+      console.log('Uploading post image to Hostinger:', imageUri);
+      
+      const formData = new FormData();
+      
+      // Handle different platforms for FormData
+      if (Platform.OS === 'web') {
+        // For web, fetch the image as blob and create File object
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        const file = new File([blob], 'post_image.jpg', { type: 'image/jpeg' });
+        formData.append('image', file);
+        console.log('Web: File object created for post image');
+      } else {
+        // For mobile, use the URI directly
+        formData.append('image', {
+          uri: imageUri,
+          type: 'image/jpeg',
+          name: 'post_image.jpg',
+        } as any);
+        console.log('Mobile: FormData created for post image');
+      }
+      
+      const uploadResponse = await fetch(`${IMAGE_API_BASE_URL}/upload_post_image.php`, {
+        method: 'POST',
+        body: formData,
+        // Don't set Content-Type header - let the browser set it with boundary
+      });
+      
+      console.log('Post image upload response status:', uploadResponse.status);
+      
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('Post image upload failed:', errorText);
+        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+      }
+      
+      const result = await uploadResponse.json();
+      console.log('Post image upload result:', result);
+      
+      if (result.success) {
+        return {
+          success: true,
+          message: result.message,
+          imageUrl: result.imageUrl,
+          imagePath: result.imagePath,
+          filename: result.filename,
+        };
+      } else {
+        return {
+          success: false,
+          message: result.error || 'Upload failed',
+          error: result.error,
+        };
+      }
+    } catch (error) {
+      console.error('Error uploading post image:', error);
       return {
         success: false,
         message: 'Network error',

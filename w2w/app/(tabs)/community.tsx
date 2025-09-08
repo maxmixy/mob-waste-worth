@@ -1,13 +1,15 @@
 import { Image } from 'expo-image';
 import { useEffect, useState, useRef } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, TouchableOpacity, View, Alert } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, TouchableOpacity, View, Alert, Platform } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
+import { ImageService } from '@/lib/imageService';
 import { ScrollView as RNScrollView } from 'react-native';
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -51,6 +53,8 @@ export default function CommunityScreen() {
   const [postText, setPostText] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+  const [userProfileImages, setUserProfileImages] = useState<{[userId: string]: string}>({});
   const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
   const [likingPostId, setLikingPostId] = useState<string | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -65,8 +69,12 @@ export default function CommunityScreen() {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/posts`);
       if (!response.ok) throw new Error('Failed to fetch posts');
-      const data = await response.json();
+      const data = await response.json() as PostData[];
       setPosts(data);
+      
+      // Load profile images for all users in posts
+      const userIds = [...new Set(data.map((post: PostData) => post.user_id))];
+      await loadUserProfileImages(userIds);
     } catch (err) {
       console.error('Error loading posts:', err);
       setError('Failed to load posts');
@@ -86,12 +94,80 @@ export default function CommunityScreen() {
     }
   };
 
+  const loadProfileImage = async (uid: string) => {
+    try {
+      console.log('Loading profile image for user:', uid);
+      const imageResponse = await ImageService.getProfileImage(uid);
+      console.log('Profile image response:', imageResponse);
+      
+      if (imageResponse.success && imageResponse.hasImage && imageResponse.imageUrl) {
+        console.log('Setting profile image URL:', imageResponse.imageUrl);
+        setProfileImageUrl(imageResponse.imageUrl);
+      } else {
+        console.log('No profile image found or error:', imageResponse.error || imageResponse.message);
+        setProfileImageUrl(null);
+      }
+    } catch (error) {
+      console.error('Error loading profile image:', error);
+      setProfileImageUrl(null);
+    }
+  };
+
+  const refreshProfileImage = async () => {
+    if (userId) {
+      console.log('Refreshing profile image...');
+      await loadProfileImage(userId);
+    }
+  };
+
+  const loadUserProfileImages = async (userIds: string[]) => {
+    console.log('Loading profile images for users:', userIds);
+    
+    // Filter out users we already have images for
+    const usersToLoad = userIds.filter(id => !userProfileImages[id]);
+    
+    if (usersToLoad.length === 0) {
+      console.log('All user profile images already loaded');
+      return;
+    }
+    
+    console.log('Loading profile images for new users:', usersToLoad);
+    
+    // Load profile images for all users in parallel
+    const imagePromises = usersToLoad.map(async (uid) => {
+      try {
+        const imageResponse = await ImageService.getProfileImage(uid);
+        if (imageResponse.success && imageResponse.hasImage && imageResponse.imageUrl) {
+          return { userId: uid, imageUrl: imageResponse.imageUrl };
+        }
+        return { userId: uid, imageUrl: null };
+      } catch (error) {
+        console.error(`Error loading profile image for user ${uid}:`, error);
+        return { userId: uid, imageUrl: null };
+      }
+    });
+    
+    const results = await Promise.all(imagePromises);
+    
+    // Update state with new profile images
+    const newProfileImages = { ...userProfileImages };
+    results.forEach(({ userId, imageUrl }) => {
+      if (imageUrl) {
+        newProfileImages[userId] = imageUrl;
+      }
+    });
+    
+    setUserProfileImages(newProfileImages);
+    console.log('Updated user profile images:', newProfileImages);
+  };
+
   useEffect(() => {
     (async () => {
       const uid = await getUserId();
       setUserId(uid);
       if (uid) {
         await loadUserProfile(uid);
+        await loadProfileImage(uid);
       }
       loadPosts();
       
@@ -152,6 +228,70 @@ export default function CommunityScreen() {
     if (!userId || (!postText.trim() && selectedImages.length === 0)) return;
     
     try {
+      console.log('Creating post with images:', selectedImages);
+      
+      // Step 1: Upload images to Hostinger first and get their paths
+      const imagePaths = [];
+      
+      if (selectedImages.length > 0) {
+        console.log('Uploading images to Hostinger...');
+        
+        for (const imageUri of selectedImages) {
+          try {
+            console.log('Processing image URI:', imageUri);
+            
+            // Try Hostinger first, fallback to local backend
+            try {
+              const uploadResult = await ImageService.uploadPostImage(imageUri);
+              
+              if (uploadResult.success && uploadResult.imagePath) {
+                console.log('Image uploaded successfully to Hostinger:', uploadResult.imagePath);
+                imagePaths.push(uploadResult.imagePath);
+              } else {
+                throw new Error(uploadResult.error || 'Hostinger upload failed');
+              }
+            } catch (hostingerError) {
+              console.warn('Hostinger upload failed, trying local backend:', hostingerError);
+              
+              // Fallback to local backend
+              const formData = new FormData();
+              
+              if (Platform.OS === 'web') {
+                const response = await fetch(imageUri);
+                const blob = await response.blob();
+                const file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
+                formData.append('image', file);
+              } else {
+                formData.append('image', {
+                  uri: imageUri,
+                  type: 'image/jpeg',
+                  name: 'image.jpg',
+                } as any);
+              }
+              
+              const uploadResponse = await fetch(`${API_BASE_URL}/upload/post-image`, {
+                method: 'POST',
+                body: formData,
+              });
+              
+              if (uploadResponse.ok) {
+                const uploadResult = await uploadResponse.json();
+                console.log('Image uploaded successfully to local backend:', uploadResult.imagePath);
+                imagePaths.push(uploadResult.imagePath);
+              } else {
+                throw new Error('Both Hostinger and local backend upload failed');
+              }
+            }
+          } catch (error) {
+            console.error('Error uploading image to Hostinger:', error);
+            throw new Error(`Failed to upload image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+        }
+      }
+      
+      console.log('All images uploaded, creating post with paths:', imagePaths);
+      
+      // Step 2: Create the post with image paths
       const response = await fetch(`${API_BASE_URL}/posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -159,7 +299,7 @@ export default function CommunityScreen() {
           user_id: userId,
           content_text: postText.trim() || '',
           status: 'published',
-          images: selectedImages // Include selected images
+          image_paths: imagePaths // Send the uploaded image paths
         }),
       });
       
@@ -169,14 +309,15 @@ export default function CommunityScreen() {
         setSelectedImages([]);
         // Reload posts to show the new one
         loadPosts();
-        Alert.alert('Success', 'Post created successfully! 🎉');
+        Alert.alert('Success', `Post created successfully with ${imagePaths.length} image${imagePaths.length !== 1 ? 's' : ''}! 🎉`);
       } else {
-        console.error('Failed to create post');
-        Alert.alert('Error', 'Failed to create post. Please try again.');
+        const errorResult = await response.json();
+        console.error('Failed to create post:', errorResult);
+        Alert.alert('Error', `Failed to create post: ${errorResult.error || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Error creating post:', err);
-      Alert.alert('Error', 'Failed to create post. Please try again.');
+      Alert.alert('Error', `Failed to create post: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -185,13 +326,101 @@ export default function CommunityScreen() {
     
     setIsProcessingAction(true);
     try {
-      // TODO: Implement photo upload functionality
-      // This would typically open an image picker using expo-image-picker
-      console.log('Photo upload pressed');
-      alert('Photo upload feature coming soon! 📸\n\nThis will allow you to select photos from your gallery to add to your post.');
+      console.log('Photo upload pressed - requesting permissions');
+      
+      // Request media library permissions
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      console.log('Permission status:', status);
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Sorry, we need camera roll permissions to select photos for your posts.',
+          [{ text: 'OK' }]
+        );
+        setIsProcessingAction(false);
+        return;
+      }
+
+      console.log('Permission granted, showing photo options');
+      
+      // Show a simple action sheet that works better across platforms
+      if (Platform.OS === 'web') {
+        // For web, go directly to image library
+        console.log('Web platform - opening image library directly');
+        await openImageLibrary();
+      } else {
+        // For mobile, show action sheet
+        Alert.alert(
+          'Add Photo',
+          'How would you like to add a photo?',
+          [
+            {
+              text: 'Photo Library',
+              onPress: async () => {
+                console.log('Photo Library selected');
+                await openImageLibrary();
+              },
+            },
+            {
+              text: 'Take Photo',
+              onPress: async () => {
+                console.log('Take Photo selected');
+                await handleCameraCapture();
+              },
+            },
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () => {
+                console.log('Photo selection cancelled');
+                setIsProcessingAction(false);
+              },
+            },
+          ]
+        );
+      }
+      
     } catch (error) {
       console.error('Error handling photo upload:', error);
+      Alert.alert('Error', 'Failed to open photo picker. Please try again.');
+      setIsProcessingAction(false);
+    }
+  };
+
+  const openImageLibrary = async () => {
+    try {
+      console.log('Opening image library');
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        allowsEditing: false,
+        aspect: [4, 3],
+      });
+
+      console.log('Image picker result:', result);
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Add selected images to the selectedImages array
+        const newImageUris = result.assets.map(asset => asset.uri);
+        setSelectedImages(prev => [...prev, ...newImageUris]);
+        
+        console.log('Added images to selection:', newImageUris);
+        Alert.alert(
+          'Success', 
+          `Added ${newImageUris.length} photo${newImageUris.length > 1 ? 's' : ''} to your post! 📸`
+        );
+      } else {
+        console.log('Image selection cancelled or no images selected');
+      }
+    } catch (error) {
+      console.error('Error opening image library:', error);
+      Alert.alert('Error', 'Failed to open photo library. Please try again.');
     } finally {
+      // Make sure to reset processing state
       setIsProcessingAction(false);
     }
   };
@@ -387,13 +616,22 @@ export default function CommunityScreen() {
          <ThemedView style={[styles.shareContainer, { flexDirection: 'column' }]}>
            {/* Top row with profile and input */}
            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-             <View style={styles.shareProfileImageContainer}>
+             <Pressable onPress={refreshProfileImage} style={styles.shareProfileImageContainer}>
                <Image
-                 source={require('@/assets/images/partial-react-logo.png')}
+                 source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
                  style={styles.shareProfileImage}
                  resizeMode="cover"
                />
-             </View>
+               {profileImageUrl && (
+                 <View style={styles.imageSourceIndicator}>
+                   <MaterialIcons 
+                     name={profileImageUrl.startsWith('http') ? 'cloud-done' : 'phone-android'} 
+                     size={12} 
+                     color="white" 
+                   />
+                 </View>
+               )}
+             </Pressable>
              <ThemedText style={styles.shareProfileName}>
                {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : (userId || 'Guest')}
              </ThemedText>
@@ -445,7 +683,11 @@ export default function CommunityScreen() {
               disabled={isProcessingAction}
             >
               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
-                <MaterialIcons name="image" size={24} color={isProcessingAction ? "#ccc" : "#4285F4"} /> Photos
+                <MaterialIcons 
+                  name="image" 
+                  size={24} 
+                  color={isProcessingAction ? Colors[colorScheme].icon : Colors[colorScheme].primary} 
+                /> Photos
               </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity 
@@ -455,7 +697,11 @@ export default function CommunityScreen() {
               disabled={isProcessingAction}
             >
               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
-                <FontAwesome5 name="link" size={22} color={isProcessingAction ? "#ccc" : "#4caf50"} /> Links
+                <FontAwesome5 
+                  name="link" 
+                  size={22} 
+                  color={isProcessingAction ? Colors[colorScheme].icon : Colors[colorScheme].accent} 
+                /> Links
               </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity 
@@ -465,7 +711,11 @@ export default function CommunityScreen() {
               disabled={isProcessingAction}
             >
               <ThemedText style={styles.shareActionLabel}> 
-                <Ionicons name="camera" size={24} color={isProcessingAction ? "#ccc" : "#fbc02d"} /> Camera
+                <Ionicons 
+                  name="camera" 
+                  size={24} 
+                  color={isProcessingAction ? Colors[colorScheme].icon : Colors[colorScheme].warning} 
+                /> Camera
               </ThemedText>
             </TouchableOpacity>
           </View>
@@ -479,10 +729,22 @@ export default function CommunityScreen() {
             <View key={post.id} style={styles.postCard}>
               {/* Header */}
               <View style={styles.postHeader}>
-                <Image
-                  source={require('@/assets/images/partial-react-logo.png')}
-                  style={styles.userAvatar}
-                />
+                <View style={styles.userAvatarContainer}>
+                  <Image
+                    source={userProfileImages[post.user_id] ? { uri: userProfileImages[post.user_id] } : require('@/assets/images/partial-react-logo.png')}
+                    style={styles.userAvatar}
+                    resizeMode="cover"
+                  />
+                  {userProfileImages[post.user_id] && (
+                    <View style={styles.postImageSourceIndicator}>
+                      <MaterialIcons 
+                        name={userProfileImages[post.user_id].startsWith('http') ? 'cloud-done' : 'phone-android'} 
+                        size={10} 
+                        color="white" 
+                      />
+                    </View>
+                  )}
+                </View>
                 <View style={{ flex: 1 }}>
                   <ThemedText style={styles.postUser}>
                     {post.user_id === userId && userProfile 
@@ -680,12 +942,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
+  userAvatarContainer: {
+    position: 'relative',
+    marginRight: 10,
+  },
   userAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    marginRight: 10,
     backgroundColor: '#eee',
+  },
+  postImageSourceIndicator: {
+    position: 'absolute',
+    bottom: -1,
+    right: -1,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'white',
   },
   postUser: {
     fontSize: 16,
@@ -863,6 +1141,19 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
   },
+  imageSourceIndicator: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+  },
   shareProfileName: {
     fontSize: 16,
     fontWeight: '600',
@@ -904,12 +1195,12 @@ const styles = StyleSheet.create({
   },
   shareActionLabel: {
     marginTop: 4,
-    color: '#4285F4',
+    color: '#2D5016',
     fontWeight: '600',
     fontSize: 15,
   },
   postButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#2D5016',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
