@@ -12,6 +12,8 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { makeRedirectUri } from 'expo-auth-session';
 import { saveUserId, checkEULAAcceptance, checkProfileCompletion } from '@/lib/user';
+import { useLocation } from '@/hooks/useLocation';
+import { useClimateStorage } from '@/hooks/useClimateStorage';
 
 // ✅ Firebase config
 const firebaseConfig = {
@@ -40,6 +42,63 @@ export default function LoginPage() {
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
+  // Location and climate storage hooks
+  const { location } = useLocation();
+  const { fetchClimateData } = useClimateStorage();
+
+  // Handle post-login flow with climate data fetching
+  const handlePostLogin = async (userId: string) => {
+    try {
+      console.log('[Login] 🔐 Login successful, checking user status...');
+      
+      // Check EULA acceptance
+      const eulaStatus = await checkEULAAcceptance(userId);
+      if (!eulaStatus.eulaAccepted) {
+        console.log('[Login] 📋 User needs to accept EULA');
+        router.replace('/(login)/eula');
+        return;
+      }
+
+      // Check profile completion status
+      const profileStatus = await checkProfileCompletion(userId);
+      
+      if (!profileStatus.profileCompleted) {
+        console.log('[Login] 👤 User needs to create profile');
+        router.replace('/(login)/profile');
+        return;
+      }
+
+      // User has completed both EULA and profile, fetch climate data and proceed to main app
+      console.log('[Login] ✅ User setup complete, fetching climate data...');
+      console.log('[Login] 🔍 Current location status:', location);
+      
+      if (location) {
+        console.log('[Login] 🌡️ Fetching climate data for location:', location);
+        try {
+          await fetchClimateData(location);
+          console.log('[Login] ✅ Climate data fetched and stored successfully');
+        } catch (error) {
+          console.error('[Login] ❌ Error fetching climate data:', error);
+          console.log('[Login] ⚠️ Continuing without climate data');
+        }
+      } else {
+        console.log('[Login] ⚠️ No location available, climate data will be fetched later');
+        console.log('[Login] 💡 This could be because:');
+        console.log('  - Location permission not granted');
+        console.log('  - Location service not available');
+        console.log('  - Location still loading');
+      }
+
+      console.log('[Login] 🚀 Navigating to main app');
+      router.replace('/(tabs)');
+      
+    } catch (error) {
+      console.error('[Login] ❌ Error in post-login flow:', error);
+      // Still navigate to main app even if climate data fails
+      router.replace('/(tabs)');
+    }
+  };
+
   const handleLogin = async () => {
     setLoading(true);
     setEmailError('');
@@ -62,25 +121,8 @@ export default function LoginPage() {
       if (userCredential?.user?.uid) {
         await saveUserId(userCredential.user.uid);
         
-        // Check EULA acceptance status
-        const eulaStatus = await checkEULAAcceptance(userCredential.user.uid);
-        
-        if (!eulaStatus.eulaAccepted) {
-          // User needs to accept EULA first
-          router.replace('/(login)/eula');
-          return;
-        }
-
-        // Check profile completion status
-        const profileStatus = await checkProfileCompletion(userCredential.user.uid);
-        
-        if (!profileStatus.profileCompleted) {
-          // User needs to create their profile
-          router.replace('/(login)/profile');
-        } else {
-          // User has completed both EULA and profile, proceed to main app
-          router.replace('/(tabs)');
-        }
+        // Handle post-login flow (EULA, profile, climate data)
+        await handlePostLogin(userCredential.user.uid);
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -110,25 +152,8 @@ export default function LoginPage() {
           if (uc?.user?.uid) {
             await saveUserId(uc.user.uid);
             
-            // Check EULA acceptance status
-            const eulaStatus = await checkEULAAcceptance(uc.user.uid);
-            
-            if (!eulaStatus.eulaAccepted) {
-              // User needs to accept EULA first
-              router.replace('/(login)/eula');
-              return;
-            }
-
-            // Check profile completion status
-            const profileStatus = await checkProfileCompletion(uc.user.uid);
-            
-            if (!profileStatus.profileCompleted) {
-              // User needs to create their profile
-              router.replace('/(login)/profile');
-            } else {
-              // User has completed both EULA and profile, proceed to main app
-              router.replace('/(tabs)');
-            }
+            // Handle post-login flow (EULA, profile, climate data)
+            await handlePostLogin(uc.user.uid);
           }
         })
         .catch(() => setEmailError('Google sign-in failed.'));

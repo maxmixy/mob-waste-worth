@@ -16,6 +16,9 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import SettingsSidebar from '@/components/SettingsSidebar';
+import { useLocation } from '@/hooks/useLocation';
+import { useClimate } from '@/hooks/useClimate';
+import { useDisposal } from '@/hooks/useDisposal';
 
 // Update this URL to the address where your backend is reachable from the device/emulator.
 // For local Python backend (this repo) the endpoint is POST /upload on port 5000.
@@ -35,11 +38,35 @@ export default function HomeScreen() {
     const [uploading, setUploading] = useState(false);
     const [sidebarVisible, setSidebarVisible] = useState(false);
     
+    // Location, climate, and disposal functionality
+    const { location, getCurrentLocation } = useLocation();
+    const { climateData, getClimateForLocation } = useClimate();
+    const { disposalData, loading: disposalLoading, error: disposalError, getDisposalForMaterial } = useDisposal();
+    
     useEffect(() => {
         if (!cameraPermission?.granted) {
         requestCameraPermission();
         }
     }, [cameraPermission]);
+    
+    // Get location and climate data when component mounts
+    useEffect(() => {
+        const initializeLocationAndClimate = async () => {
+            try {
+                console.log('[Scan] Initializing location and climate data...');
+                const currentLocation = await getCurrentLocation();
+                if (currentLocation) {
+                    console.log('[Scan] Location obtained, getting climate data...');
+                    await getClimateForLocation(currentLocation);
+                }
+            } catch (error) {
+                console.error('[Scan] Error initializing location/climate:', error);
+                // Continue without location/climate data
+            }
+        };
+        
+        initializeLocationAndClimate();
+    }, []);
     
     if (!cameraPermission) {
         return (
@@ -125,7 +152,41 @@ export default function HomeScreen() {
                  try { json = JSON.parse(text); } catch (e) { json = { raw: text }; }
                  console.log('Upload response', json);
                  
-                 // Navigate to detail page with the scan data
+                 // Check for disposal methods if material was identified
+                 if (json && json.material_name && location && climateData) {
+                     console.log('[Scan] Checking disposal methods for scanned material:', json.material_name);
+                     try {
+                         const disposalResponse = await getDisposalForMaterial({
+                             materialName: json.material_name,
+                             climateData: climateData,
+                             location: {
+                                 latitude: location.latitude,
+                                 longitude: location.longitude
+                             }
+                         });
+                         
+                         if (disposalResponse.found && disposalResponse.disposalData) {
+                             console.log('[Scan] Disposal method found:', {
+                                 materialName: disposalResponse.disposalData.material_name,
+                                 stepsCount: disposalResponse.disposalData.disposal_steps.length,
+                                 aiGenerated: disposalResponse.aiGenerated
+                             });
+                             
+                             // Add disposal data to the scan response
+                             json.disposal_data = disposalResponse.disposalData;
+                             json.disposal_ai_generated = disposalResponse.aiGenerated;
+                         } else {
+                             console.log('[Scan] No disposal method found for material');
+                         }
+                     } catch (disposalError) {
+                         console.error('[Scan] Error checking disposal methods:', disposalError);
+                         // Continue without disposal data
+                     }
+                 } else {
+                     console.log('[Scan] Skipping disposal check - missing material name, location, or climate data');
+                 }
+                 
+                 // Navigate to detail page with the scan data (including disposal data if available)
                  router.push({
                      pathname: '/pages/detail',
                      params: { scanData: JSON.stringify(json) }

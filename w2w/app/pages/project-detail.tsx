@@ -17,6 +17,15 @@ interface RecyclingProject {
     steps: string[];
 }
 
+interface ProjectProgress {
+    projectId: string;
+    completedSteps: number[];
+    currentStep: number;
+    startedAt: string;
+    lastUpdated: string;
+    isCompleted: boolean;
+}
+
 export default function ProjectDetailScreen() {
     const params = useLocalSearchParams();
     const router = useRouter();
@@ -25,6 +34,9 @@ export default function ProjectDetailScreen() {
     const [error, setError] = useState<string | null>(null);
     const [isCurrentProject, setIsCurrentProject] = useState(false);
     const [settingCurrentProject, setSettingCurrentProject] = useState(false);
+    const [progress, setProgress] = useState<ProjectProgress | null>(null);
+    const [updatingProgress, setUpdatingProgress] = useState(false);
+    const [showCompletionCelebration, setShowCompletionCelebration] = useState(false);
 
     // Fetch project details from backend
     const fetchProjectDetails = async (projectId: string) => {
@@ -67,6 +79,96 @@ export default function ProjectDetailScreen() {
         }
     };
 
+    // Fetch project progress
+    const fetchProjectProgress = async (projectId: string) => {
+        try {
+            const userId = await getUserId();
+            if (!userId) return;
+
+            console.log('Fetching progress for project:', projectId);
+            const response = await fetch(`${API_BASE_URL}/user/${userId}/project/${projectId}/progress`);
+            if (response.ok) {
+                const progressData = await response.json();
+                console.log('Project progress fetched:', progressData);
+                setProgress(progressData);
+            } else if (response.status === 404) {
+                // No progress exists yet, create initial progress
+                console.log('No progress found, will create when first step is completed');
+                setProgress(null);
+            }
+        } catch (error) {
+            console.error('Error fetching project progress:', error);
+        }
+    };
+
+    // Update project progress
+    const updateProjectProgress = async (stepIndex: number, isCompleted: boolean) => {
+        if (!project || !isCurrentProject) return;
+
+        try {
+            setUpdatingProgress(true);
+            const userId = await getUserId();
+            if (!userId) return;
+
+            console.log('Updating progress for step:', stepIndex, 'completed:', isCompleted);
+            
+            const response = await fetch(`${API_BASE_URL}/user/${userId}/project/${project.id}/progress`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    stepIndex,
+                    isCompleted,
+                    timestamp: new Date().toISOString()
+                })
+            });
+
+            if (response.ok) {
+                const updatedProgress = await response.json();
+                console.log('Progress updated successfully:', updatedProgress);
+                setProgress(updatedProgress);
+                
+                // Check if project is completed and show celebration
+                if (updatedProgress.isCompleted && !progress?.isCompleted) {
+                    console.log('🎉 Project completed! Showing celebration...');
+                    setShowCompletionCelebration(true);
+                }
+            } else {
+                console.error('Failed to update progress');
+            }
+        } catch (error) {
+            console.error('Error updating project progress:', error);
+        } finally {
+            setUpdatingProgress(false);
+        }
+    };
+
+    // Navigate to social page with pre-filled completion post
+    const shareCompletionOnSocial = () => {
+        if (!project) return;
+        
+        const postContent = `🎉 Just completed my recycling project: "${project.project_name}"! 
+        
+✅ Made from: ${project.material_name}
+📋 Completed all ${project.steps.length} steps
+♻️ Another step towards a greener future!
+
+#Recycling #Sustainability #WasteToWonder #EcoFriendly`;
+
+        // Navigate to community page with pre-filled content
+        router.push({
+            pathname: '/(tabs)/community',
+            params: {
+                prefillContent: postContent,
+                showPostModal: 'true'
+            }
+        } as any);
+        
+        // Hide celebration modal
+        setShowCompletionCelebration(false);
+    };
+
     // Set this project as the user's current project
     const setAsCurrentProject = async () => {
         if (!project) {
@@ -106,13 +208,10 @@ export default function ProjectDetailScreen() {
                         {
                             text: 'OK',
                             onPress: () => {
-                                console.log('Navigating back to index page with refresh');
-                                // Navigate back to index page with refresh parameter
-                                router.push('/(tabs)/' as any);
-                                // Use setTimeout to ensure navigation completes before setting refresh
-                                setTimeout(() => {
-                                    router.setParams({ refresh: 'true' });
-                                }, 100);
+                                console.log('Navigating back to index page');
+                                // Clear navigation stack and navigate to home
+                                router.dismissAll();
+                                router.push('/' as any);
                             }
                         }
                     ]
@@ -163,6 +262,13 @@ export default function ProjectDetailScreen() {
         loadProjectData();
     }, [params.projectId]);
 
+    // Fetch progress when project becomes current
+    useEffect(() => {
+        if (project && isCurrentProject) {
+            fetchProjectProgress(project.id);
+        }
+    }, [project, isCurrentProject]);
+
     if (loading) {
         return (
             <ThemedView style={styles.loadingContainer}>
@@ -183,6 +289,7 @@ export default function ProjectDetailScreen() {
     }
 
     return (
+        <>
         <ScrollView style={styles.container}>
             {/* Project Image Section */}
             <ThemedView style={styles.imageSection}>
@@ -232,17 +339,94 @@ export default function ProjectDetailScreen() {
                 <ThemedText type="subtitle" style={styles.sectionTitle}>
                     Instructions ({project.steps.length} steps)
                 </ThemedText>
+                
+                {/* Progress Section - Only show for current project */}
+                {isCurrentProject && (
+                    <ThemedView style={styles.progressSection}>
+                        <ThemedText type="defaultSemiBold" style={styles.progressTitle}>
+                            Progress Tracking
+                        </ThemedText>
+                        <ThemedText style={styles.progressNote}>
+                            Complete steps in order. Marking a step complete will also complete all previous steps.
+                        </ThemedText>
+                        {progress && (
+                            <ThemedView style={styles.progressInfo}>
+                                <ThemedText style={styles.progressText}>
+                                    {progress.completedSteps.length} of {project.steps.length} steps completed
+                                </ThemedText>
+                                <ThemedView style={styles.progressBar}>
+                                    <ThemedView 
+                                        style={[
+                                            styles.progressFill, 
+                                            { width: `${(progress.completedSteps.length / project.steps.length) * 100}%` }
+                                        ]} 
+                                    />
+                                </ThemedView>
+                            </ThemedView>
+                        )}
+                    </ThemedView>
+                )}
+                
                 <ThemedView style={styles.stepsContainer}>
-                    {project.steps.map((step, index) => (
-                        <ThemedView key={index} style={styles.stepItem}>
-                            <ThemedView style={styles.stepNumber}>
-                                <ThemedText style={styles.stepNumberText}>{index + 1}</ThemedText>
+                    {project.steps.map((step, index) => {
+                        const isCompleted = progress?.completedSteps.includes(index) || false;
+                        const isCurrentStep = progress?.currentStep === index;
+                        
+                        return (
+                            <ThemedView key={index} style={[
+                                styles.stepItem,
+                                isCompleted && styles.stepItemCompleted,
+                                isCurrentStep && styles.stepItemCurrent
+                            ]}>
+                                <ThemedView style={[
+                                    styles.stepNumber,
+                                    isCompleted && styles.stepNumberCompleted,
+                                    isCurrentStep && styles.stepNumberCurrent
+                                ]}>
+                                    {isCompleted ? (
+                                        <ThemedText style={styles.stepNumberText}>✓</ThemedText>
+                                    ) : (
+                                        <ThemedText style={styles.stepNumberText}>{index + 1}</ThemedText>
+                                    )}
+                                </ThemedView>
+                                <ThemedView style={styles.stepContent}>
+                                    <ThemedText style={[
+                                        styles.stepText,
+                                        isCompleted && styles.stepTextCompleted
+                                    ]}>
+                                        {step}
+                                    </ThemedText>
+                                    
+                                    {/* Progress Controls - Only show for current project */}
+                                    {isCurrentProject && (
+                                        <ThemedView style={styles.stepControls}>
+                                            {!isCompleted ? (
+                                                <TouchableOpacity
+                                                    style={styles.completeButton}
+                                                    onPress={() => updateProjectProgress(index, true)}
+                                                    disabled={updatingProgress}
+                                                >
+                                                    <ThemedText style={styles.completeButtonText}>
+                                                        {updatingProgress ? 'Updating...' : 'Mark Complete'}
+                                                    </ThemedText>
+                                                </TouchableOpacity>
+                                            ) : (
+                                                <TouchableOpacity
+                                                    style={styles.undoButton}
+                                                    onPress={() => updateProjectProgress(index, false)}
+                                                    disabled={updatingProgress}
+                                                >
+                                                    <ThemedText style={styles.undoButtonText}>
+                                                        {updatingProgress ? 'Updating...' : 'Undo'}
+                                                    </ThemedText>
+                                                </TouchableOpacity>
+                                            )}
+                                        </ThemedView>
+                                    )}
+                                </ThemedView>
                             </ThemedView>
-                            <ThemedView style={styles.stepContent}>
-                                <ThemedText style={styles.stepText}>{step}</ThemedText>
-                            </ThemedView>
-                        </ThemedView>
-                    ))}
+                        );
+                    })}
                 </ThemedView>
             </ThemedView>
 
@@ -306,6 +490,50 @@ export default function ProjectDetailScreen() {
             {/* Bottom Spacing */}
             <ThemedView style={styles.bottomSpacing} />
         </ScrollView>
+
+        {/* Completion Celebration Modal */}
+        {showCompletionCelebration && (
+            <ThemedView style={styles.celebrationOverlay}>
+                <ThemedView style={styles.celebrationModal}>
+                    <ThemedView style={styles.celebrationContent}>
+                        <ThemedText style={styles.celebrationEmoji}>🎉</ThemedText>
+                        <ThemedText style={styles.celebrationTitle}>
+                            Congratulations!
+                        </ThemedText>
+                        <ThemedText style={styles.celebrationSubtitle}>
+                            You've completed "{project?.project_name}"!
+                        </ThemedText>
+                        <ThemedText style={styles.celebrationDescription}>
+                            Great job on finishing your recycling project! 
+                            Share your achievement with the community and inspire others.
+                        </ThemedText>
+                        
+                        <ThemedView style={styles.celebrationButtons}>
+                            <TouchableOpacity 
+                                style={styles.shareButton}
+                                onPress={shareCompletionOnSocial}
+                                activeOpacity={0.7}
+                            >
+                                <ThemedText style={styles.shareButtonText}>
+                                    Share on Social
+                                </ThemedText>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity 
+                                style={styles.dismissButton}
+                                onPress={() => setShowCompletionCelebration(false)}
+                                activeOpacity={0.7}
+                            >
+                                <ThemedText style={styles.dismissButtonText}>
+                                    Maybe Later
+                                </ThemedText>
+                            </TouchableOpacity>
+                        </ThemedView>
+                    </ThemedView>
+                </ThemedView>
+            </ThemedView>
+        )}
+        </>
     );
 }
 
@@ -527,6 +755,178 @@ const styles = StyleSheet.create({
     },
     currentProjectText: {
         color: '#28a745',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    // Progress tracking styles
+    progressSection: {
+        backgroundColor: '#f8f9fa',
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    progressTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#495057',
+        marginBottom: 8,
+    },
+    progressNote: {
+        fontSize: 12,
+        color: '#6c757d',
+        fontStyle: 'italic',
+        marginBottom: 12,
+    },
+    progressInfo: {
+        marginBottom: 8,
+    },
+    progressText: {
+        fontSize: 14,
+        color: '#6c757d',
+        marginBottom: 8,
+    },
+    progressBar: {
+        height: 8,
+        backgroundColor: '#e9ecef',
+        borderRadius: 4,
+        overflow: 'hidden',
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#28a745',
+        borderRadius: 4,
+    },
+    stepItemCompleted: {
+        backgroundColor: '#f8f9fa',
+        borderColor: '#28a745',
+    },
+    stepItemCurrent: {
+        backgroundColor: '#fff3cd',
+        borderColor: '#ffc107',
+    },
+    stepNumberCompleted: {
+        backgroundColor: '#28a745',
+    },
+    stepNumberCurrent: {
+        backgroundColor: '#ffc107',
+    },
+    stepTextCompleted: {
+        textDecorationLine: 'line-through',
+        color: '#6c757d',
+    },
+    stepControls: {
+        marginTop: 8,
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+    },
+    completeButton: {
+        backgroundColor: '#28a745',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 6,
+    },
+    completeButtonText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '500',
+    },
+    undoButton: {
+        backgroundColor: '#6c757d',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 6,
+    },
+    undoButtonText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '500',
+    },
+    // Celebration modal styles
+    celebrationOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1000,
+    },
+    celebrationModal: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        padding: 24,
+        margin: 20,
+        maxWidth: 400,
+        width: '90%',
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 10,
+        },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    celebrationContent: {
+        alignItems: 'center',
+    },
+    celebrationEmoji: {
+        fontSize: 48,
+        marginBottom: 16,
+    },
+    celebrationTitle: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: '#28a745',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    celebrationSubtitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    celebrationDescription: {
+        fontSize: 14,
+        color: '#666',
+        textAlign: 'center',
+        lineHeight: 20,
+        marginBottom: 24,
+    },
+    celebrationButtons: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    shareButton: {
+        flex: 1,
+        backgroundColor: '#28a745',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    shareButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    dismissButton: {
+        flex: 1,
+        backgroundColor: '#6c757d',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    dismissButtonText: {
+        color: '#fff',
         fontSize: 16,
         fontWeight: '600',
     },

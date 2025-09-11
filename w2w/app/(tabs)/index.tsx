@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { StyleSheet, View, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { Pressable } from 'react-native';
 import { useState, useEffect } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -14,6 +14,10 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import SettingsSidebar from '@/components/SettingsSidebar';
+import { useLocation, LocationData } from '@/hooks/useLocation';
+import { useClimate } from '@/hooks/useClimate';
+import { ClimateData } from '@/lib/climateService';
+import { populateTropicalDisposalTable, getUniqueMaterialsCount, getTropicalDisposalCount } from '@/lib/adminService';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -66,6 +70,13 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('User');
+  const [adminTapCount, setAdminTapCount] = useState(0);
+  
+  // Location functionality
+  const { location, error: locationError, loading: locationLoading, requestLocation } = useLocation();
+  
+  // Climate functionality
+  const { climateData, loading: climateLoading, error: climateError, getClimateForLocation } = useClimate();
 
   // Fetch user's scanned materials
   const fetchUserMaterials = async (userId: string) => {
@@ -82,9 +93,16 @@ export default function HomeScreen() {
   // Fetch material details by ID
   const fetchMaterialDetails = async (materialId: string) => {
     try {
+      console.log(`[Index] Fetching material details for ID: ${materialId}`);
       const response = await fetch(`${API_BASE_URL}/material/${materialId}`);
       if (!response.ok) throw new Error('Failed to fetch material details');
-      return await response.json();
+      const data = await response.json();
+      console.log(`[Index] Material details fetched:`, {
+        id: data.id,
+        name: data.Name,
+        imageUrl: data.ImageUrl
+      });
+      return data;
     } catch (error) {
       console.error('Error fetching material details:', error);
       return null;
@@ -124,6 +142,106 @@ export default function HomeScreen() {
   // Navigate to material detail page
   const navigateToMaterialDetail = (materialId: string) => {
     router.push(`/pages/detail?materialId=${materialId}`);
+  };
+
+  // Send location data to backend (for future use)
+  const sendLocationToBackend = async (locationData: LocationData) => {
+    try {
+      const userId = await getUserId();
+      if (!userId) return;
+
+      const response = await fetch(`${API_BASE_URL}/user/${userId}/location`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          accuracy: locationData.accuracy,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      if (response.ok) {
+        console.log('Location data sent to backend successfully');
+      } else {
+        console.error('Failed to send location data to backend');
+      }
+    } catch (error) {
+      console.error('Error sending location data:', error);
+    }
+  };
+
+  // Handle location update
+  const handleLocationUpdate = async () => {
+    await requestLocation();
+    if (location) {
+      // Send to backend for future location-based features
+      await sendLocationToBackend(location);
+      // Get climate data for the location
+      await getClimateForLocation(location);
+    }
+  };
+
+  // Admin function to populate tropical disposal table
+  const handleAdminFunction = async () => {
+    try {
+      Alert.alert(
+        'Admin Function',
+        'Populate tropical disposal table for all existing materials?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Yes', 
+            onPress: async () => {
+              try {
+                Alert.alert('Processing', 'Populating disposal table... This may take a moment.');
+                
+                const result = await populateTropicalDisposalTable();
+                
+                Alert.alert(
+                  'Population Complete',
+                  `Processed: ${result.results.processed}\n` +
+                  `Successful: ${result.results.successful}\n` +
+                  `Failed: ${result.results.failed}\n` +
+                  `Skipped: ${result.results.skipped}\n` +
+                  `Errors: ${result.results.errors.length}`,
+                  [{ text: 'OK' }]
+                );
+              } catch (error) {
+                Alert.alert('Error', `Failed to populate disposal table: ${error}`);
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Admin function error:', error);
+    }
+  };
+
+  // Handle title tap for admin function
+  const handleTitleTap = () => {
+    const newCount = adminTapCount + 1;
+    setAdminTapCount(newCount);
+    
+    if (newCount >= 5) {
+      setAdminTapCount(0);
+      handleAdminFunction();
+    } else if (newCount >= 3) {
+      // Show hint after 3 taps
+      setTimeout(() => {
+        if (adminTapCount >= 3) {
+          Alert.alert('Admin Mode', `Tap ${5 - newCount} more times to access admin functions`);
+        }
+      }, 1000);
+    }
+    
+    // Reset counter after 5 seconds
+    setTimeout(() => {
+      setAdminTapCount(0);
+    }, 5000);
   };
 
   // Refresh current project data
@@ -454,15 +572,17 @@ export default function HomeScreen() {
                 lightColor={Colors.light.background}
                 darkColor={Colors.dark.background}
               >
-                <ThemedText type="subtitle">Current Project 
-                  <Pressable
-                    style={styles.settingsButton}
-                    onPress={() => setSidebarVisible(true)}
-                    accessibilityLabel="Settings"
-                  >
-                    <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
-                  </Pressable>
-                </ThemedText>
+                <Pressable onPress={handleTitleTap}>
+                  <ThemedText type="subtitle">Current Project 
+                    <Pressable
+                      style={styles.settingsButton}
+                      onPress={() => setSidebarVisible(true)}
+                      accessibilityLabel="Settings"
+                    >
+                      <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
+                    </Pressable>
+                  </ThemedText>
+                </Pressable>
                 
                 <TouchableOpacity 
                   style={styles.currentProjectCard}
@@ -501,7 +621,9 @@ export default function HomeScreen() {
             darkColor={Colors.dark.background}
           >
             <View style={styles.materialsHeader}>
-              <ThemedText type="subtitle">Your Scanned Materials</ThemedText>
+              <Pressable onPress={handleTitleTap}>
+                <ThemedText type="subtitle">Your Scanned Materials</ThemedText>
+              </Pressable>
               {userMaterials.length > 3 && (
                 <Pressable
                   style={styles.showMoreButton}
@@ -522,11 +644,15 @@ export default function HomeScreen() {
                     onPress={() => navigateToMaterialDetail(material.id)}
                     activeOpacity={0.7}
                   >
-                    <Image
-                      source={material.imageUrl ? { uri: material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
-                      style={styles.materialCardImage}
-                      resizeMode="contain"
-                    />
+                    <View style={styles.materialImageContainer}>
+                      <Image
+                        source={material.imageUrl ? { uri: material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
+                        style={styles.materialCardImage}
+                        resizeMode="contain"
+                        onLoad={() => console.log(`[Index] Image loaded for ${material.Name}`)}
+                        onError={(error) => console.log(`[Index] Image failed to load for ${material.Name}:`, error)}
+                      />
+                    </View>
                     <View style={styles.materialCardContent}>
                       <ThemedText type="defaultSemiBold" style={styles.materialCardTitle}>{material.Name}</ThemedText>
                       <ThemedText style={styles.materialCardDescription}>
@@ -547,6 +673,175 @@ export default function HomeScreen() {
               )}
             </View>
           </ThemedView>
+          {/* Divider Line */}
+          <View style={styles.divider} />
+          
+          {/* Location Section */}
+          <ThemedView
+            style={[styles.section, { flex: 1 }]}
+            lightColor={Colors.light.background}
+            darkColor={Colors.dark.background}
+          >
+            <View style={styles.locationHeader}>
+              <ThemedText type="subtitle">Your Location</ThemedText>
+              <TouchableOpacity
+                style={[
+                  styles.locationButton,
+                  { backgroundColor: Colors[colorScheme].tint }
+                ]}
+                onPress={handleLocationUpdate}
+                disabled={locationLoading}
+              >
+                <MaterialIcons 
+                  name="my-location" 
+                  size={16} 
+                  color="white" 
+                />
+                <ThemedText style={styles.locationButtonText}>
+                  {locationLoading ? 'Getting...' : 'Get Location'}
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+            
+            <RNScrollView 
+              style={styles.locationScrollContainer}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+            >
+              {locationError && (
+                <View style={styles.locationErrorContainer}>
+                  <ThemedText style={styles.locationErrorText}>
+                    {locationError.message}
+                  </ThemedText>
+                </View>
+              )}
+              
+              {location && (
+                <View style={styles.locationInfoContainer}>
+                  <View style={styles.locationInfo}>
+                    <MaterialIcons name="place" size={20} color={Colors[colorScheme].tint} />
+                    <View style={styles.locationDetails}>
+                      <ThemedText style={styles.locationCoordinates}>
+                        {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+                      </ThemedText>
+                      {location.accuracy && (
+                        <ThemedText style={styles.locationAccuracy}>
+                          Accuracy: {location.accuracy.toFixed(0)}m
+                        </ThemedText>
+                      )}
+                    </View>
+                  </View>
+                  
+                  {/* Climate Information */}
+                  {climateLoading && (
+                    <View style={styles.climateLoadingContainer}>
+                      <ActivityIndicator size="small" color={Colors[colorScheme].tint} />
+                      <ThemedText style={styles.climateLoadingText}>Getting climate data...</ThemedText>
+                    </View>
+                  )}
+                  
+                  {climateError && (
+                    <View style={styles.climateErrorContainer}>
+                      <ThemedText style={styles.climateErrorText}>
+                        Climate data unavailable: {climateError}
+                      </ThemedText>
+                    </View>
+                  )}
+                  
+                  {climateData && (
+                    <View style={styles.climateInfoContainer}>
+                      <View style={styles.climateHeader}>
+                        <MaterialIcons name="wb-sunny" size={16} color="#FF9800" />
+                        <ThemedText style={styles.climateZoneText}>
+                          {climateData.climateZone} Climate
+                        </ThemedText>
+                      </View>
+                      
+                      <View style={styles.climateDetails}>
+                        <View style={styles.climateDetailRow}>
+                          <MaterialIcons name="thermostat" size={14} color="#666" />
+                          <ThemedText style={styles.climateDetailText}>
+                            {climateData.temperature.average}°{climateData.temperature.unit}
+                          </ThemedText>
+                        </View>
+                        <View style={styles.climateDetailRow}>
+                          <MaterialIcons name="opacity" size={14} color="#666" />
+                          <ThemedText style={styles.climateDetailText}>
+                            {climateData.humidity}% humidity
+                          </ThemedText>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.recyclingGuidelinesContainer}>
+                        <ThemedText style={styles.recyclingGuidelinesTitle}>
+                          Recycling Guidelines:
+                        </ThemedText>
+                        <View style={styles.recyclingGuidelinesList}>
+                          <View style={styles.recyclingGuidelineItem}>
+                            <MaterialIcons 
+                              name={climateData.recyclingGuidelines.composting ? "check-circle" : "cancel"} 
+                              size={14} 
+                              color={climateData.recyclingGuidelines.composting ? "#4CAF50" : "#F44336"} 
+                            />
+                            <ThemedText style={styles.recyclingGuidelineText}>
+                              Composting: {climateData.recyclingGuidelines.composting ? "Available" : "Limited"}
+                            </ThemedText>
+                          </View>
+                          <View style={styles.recyclingGuidelineItem}>
+                            <MaterialIcons name="recycling" size={14} color="#2196F3" />
+                            <ThemedText style={styles.recyclingGuidelineText}>
+                              Plastics: {climateData.recyclingGuidelines.plasticRecycling.join(", ")}
+                            </ThemedText>
+                          </View>
+                        </View>
+                        
+                        <TouchableOpacity
+                          style={[
+                            styles.disposalTipsButton,
+                            { backgroundColor: Colors[colorScheme].tint }
+                          ]}
+                          onPress={() => {
+                            // Show disposal tips in an alert for now
+                            const tips = climateData.disposalTips.join('\n• ');
+                            Alert.alert(
+                              `${climateData.climateZone} Climate Disposal Tips`,
+                              `• ${tips}`,
+                              [{ text: 'OK' }]
+                            );
+                          }}
+                        >
+                          <MaterialIcons name="info" size={14} color="white" />
+                          <ThemedText style={styles.disposalTipsButtonText}>
+                            View Disposal Tips
+                          </ThemedText>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                  
+                  <ThemedText style={styles.locationHint}>
+                    Location data can be used for nearby recycling centers and local projects
+                  </ThemedText>
+                </View>
+              )}
+              
+              {!location && !locationError && (
+                <View style={styles.locationEmptyState}>
+                  <MaterialIcons name="location-off" size={32} color="#ccc" />
+                  <ThemedText style={styles.locationEmptyText}>
+                    No location data available
+                  </ThemedText>
+                  <ThemedText style={styles.locationEmptySubtext}>
+                    Tap "Get Location" to enable location-based features
+                  </ThemedText>
+                  <ThemedText style={styles.locationWebHint}>
+                    On web: Your browser will ask for location permission
+                  </ThemedText>
+                </View>
+              )}
+            </RNScrollView>
+          </ThemedView>
+          
           {/* Divider Line */}
           <View style={styles.divider} />
           {/* Profile Section (Bottom) */}
@@ -594,15 +889,6 @@ export default function HomeScreen() {
                     style={styles.profileImage}
                     resizeMode="cover"
                   />
-                  {profileImageUrl && (
-                    <View style={styles.imageSourceIndicator}>
-                      <MaterialIcons 
-                        name={profileImageUrl.startsWith('http') ? 'cloud-done' : 'phone-android'} 
-                        size={12} 
-                        color="white" 
-                      />
-                    </View>
-                  )}
                 </Pressable>
                 <View style={styles.profileInfo}>
                   <ThemedText type="defaultSemiBold" style={styles.profileName}>
@@ -959,10 +1245,26 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
   },
+  materialImageContainer: {
+    position: 'relative',
+    marginBottom: 8,
+  },
   materialCardImage: {
     width: 60,
     height: 60,
-    marginBottom: 8,
+  },
+  materialImageSourceIndicator: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: 'white',
+    borderRadius: 6,
+    padding: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1,
+    elevation: 2,
   },
   materialCardContent: {
     alignItems: 'center',
@@ -983,5 +1285,189 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     marginTop: 8,
     fontWeight: '500',
+  },
+  // Location section styles
+  locationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  locationScrollContainer: {
+    flex: 1,
+    maxHeight: 400,
+  },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    gap: 6,
+  },
+  locationButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  locationErrorContainer: {
+    backgroundColor: '#ffebee',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  locationErrorText: {
+    color: '#c62828',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  locationInfoContainer: {
+    backgroundColor: '#f0f8ff',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e3f2fd',
+  },
+  locationInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  locationDetails: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  locationCoordinates: {
+    fontSize: 14,
+    fontFamily: 'monospace',
+    color: '#1976d2',
+    fontWeight: '600',
+  },
+  locationAccuracy: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  locationHint: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  locationEmptyState: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  locationEmptyText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  locationEmptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  locationWebHint: {
+    fontSize: 12,
+    color: '#007AFF',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  // Climate information styles
+  climateLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    marginTop: 8,
+  },
+  climateLoadingText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+  },
+  climateErrorContainer: {
+    backgroundColor: '#ffebee',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 8,
+  },
+  climateErrorText: {
+    color: '#c62828',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  climateInfoContainer: {
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  climateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  climateZoneText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginLeft: 6,
+  },
+  climateDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  climateDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  climateDetailText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
+  },
+  recyclingGuidelinesContainer: {
+    marginTop: 8,
+  },
+  recyclingGuidelinesTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 6,
+  },
+  recyclingGuidelinesList: {
+    gap: 4,
+  },
+  recyclingGuidelineItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recyclingGuidelineText: {
+    fontSize: 11,
+    color: '#666',
+    marginLeft: 6,
+    flex: 1,
+  },
+  disposalTipsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginTop: 8,
+    gap: 6,
+  },
+  disposalTipsButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

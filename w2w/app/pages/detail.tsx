@@ -4,6 +4,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { getUserId } from '@/lib/user';
+import { useLocation } from '@/hooks/useLocation';
+import { useClimateStorage } from '@/hooks/useClimateStorage';
 
 const LOG_URL = 'http://127.0.0.1:5000/log';
 const API_BASE_URL = 'http://127.0.0.1:5000';
@@ -23,7 +25,7 @@ interface MaterialData {
     id: string;
     Name: string;
     Traits: string[];
-    imageUrl?: string;
+    ImageUrl?: string;
     disposalMethods?: string;
     ImageOptions?: ImageOption[];
 }
@@ -37,10 +39,22 @@ interface RecyclingProject {
     steps: string[];
 }
 
+interface DisposalMethod {
+    id?: string;
+    material_name: string;
+    climate_classification: string;
+    climate_location: string;
+    disposal_steps: string[];
+    created_at?: string;
+    updated_at?: string;
+    isFallbackData?: boolean;
+    isStoredData?: boolean;
+}
+
 interface DetailPageData {
     material: MaterialData;
     recyclingProjects: RecyclingProject[];
-    disposalMethods: string;
+    disposalMethods: DisposalMethod | null;
     relatedMaterials: MaterialData[];
 }
 
@@ -57,6 +71,29 @@ export default function DetailScreen() {
     const [showImageSelection, setShowImageSelection] = useState(false);
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
     const [isSelectingImage, setIsSelectingImage] = useState(false);
+    
+    // Location and climate storage hooks
+    const { location } = useLocation();
+    const { climateData, location: storedLocation, isDataFresh, fetchClimateData } = useClimateStorage();
+    
+    // Debug climate and location data
+    console.log('[Detail Page] 🔍 Climate and Location Debug:');
+    console.log('  Current Location:', location);
+    console.log('  Stored Location:', storedLocation);
+    console.log('  Stored Climate Data:', climateData);
+    console.log('  Climate Data Available:', !!climateData);
+    console.log('  Data is Fresh:', isDataFresh);
+    console.log('  Current Location Available:', !!location);
+    
+    // Fallback: If we have location but no stored climate data, try to fetch it
+    useEffect(() => {
+        if (location && !climateData) {
+            console.log('[Detail Page] 🔄 No stored climate data, attempting to fetch...');
+            fetchClimateData(location).catch(error => {
+                console.error('[Detail Page] ❌ Failed to fetch climate data:', error);
+            });
+        }
+    }, [location, climateData, fetchClimateData]);
 
     // Handle image selection for new materials
     const handleImageSelection = async (imageIndex: number) => {
@@ -161,14 +198,12 @@ export default function DetailScreen() {
                     id: data.material.id,
                     name: data.material.Name,
                     traits: data.material.Traits,
-                    hasImageUrl: !!data.material.imageUrl,
-                    imageUrl: data.material.imageUrl ? 'Present' : 'Missing',
-                    imageSource: data.material.imageUrl ? (data.material.imageUrl.includes('unsplash') ? 'Unsplash API' : 'Other') : 'None'
+                    hasImageUrl: !!data.material.ImageUrl,
+                    imageUrl: data.material.ImageUrl ? 'Present' : 'Missing'
                 });
                 
-                if (data.material.imageUrl) {
-                    console.log(`[Material Details] Image URL found: ${data.material.imageUrl}`);
-                    console.log(`[Material Details] Image source: ${data.material.imageUrl.includes('unsplash') ? 'Unsplash API' : 'Other source'}`);
+                if (data.material.ImageUrl) {
+                    console.log(`[Material Details] Image URL found: ${data.material.ImageUrl}`);
                 } else {
                     console.log(`[Material Details] No image URL found for material: ${data.material.Name}`);
                 }
@@ -374,17 +409,136 @@ export default function DetailScreen() {
         }
     };
 
-    // Fetch disposal methods for the material
-    const fetchDisposalMethods = async (materialId: string) => {
+    // Fetch disposal methods for the material based on material name and climate
+    const fetchDisposalMethods = async (materialName: string) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/disposal/${materialId}`);
-            if (!response.ok) throw new Error('Failed to fetch disposal methods');
+            console.log(`[Disposal Methods] 🔍 Fetching disposal methods for material: ${materialName}`);
+            
+            // Check if we have stored climate data
+            if (!climateData) {
+                console.log('[Disposal Methods] ⚠️ No stored climate data available, using fallback values');
+                console.log('[Disposal Methods] 💡 Using default tropical climate for disposal method lookup');
+                console.log('[Disposal Methods] 🔍 This could be because:');
+                console.log('  - User just logged in and climate data is still loading');
+                console.log('  - Location permission was not granted');
+                console.log('  - Climate service is unavailable');
+                
+                // Use fallback values for climate data
+                const fallbackClimateData = {
+                    climateZone: 'Tropical',
+                    temperature: { average: 28, unit: 'C' },
+                    humidity: 75
+                };
+                
+                console.log(`[Disposal Methods] 📊 Using fallback climate data:`);
+                console.log(`  Climate Zone: ${fallbackClimateData.climateZone}`);
+                console.log(`  Temperature: ${fallbackClimateData.temperature.average}°${fallbackClimateData.temperature.unit}`);
+                console.log(`  Humidity: ${fallbackClimateData.humidity}%`);
+                console.log(`  Location: ${location ? `${location.latitude},${location.longitude}` : '0,0'}`);
+                
+                const requestBody = {
+                    material_name: materialName,
+                    climate_classification: fallbackClimateData.climateZone,
+                    climate_location: location ? `${location.latitude},${location.longitude}` : '0,0'
+                };
+                
+                console.log(`[Disposal Methods] 📤 Sending fallback request to /disposal/check:`, requestBody);
+                
+                const response = await fetch(`${API_BASE_URL}/disposal/check`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                console.log(`[Disposal Methods] 📥 Fallback response status: ${response.status} ${response.statusText}`);
+                
+                if (!response.ok) {
+                    console.error(`[Disposal Methods] ❌ Fallback HTTP error: ${response.status} ${response.statusText}`);
+                    throw new Error(`Failed to fetch disposal methods: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log(`[Disposal Methods] 📋 Fallback response data:`, data);
+                
+                if (data.found && data.disposal_data) {
+                    console.log(`[Disposal Methods] ✅ Found disposal method with fallback data for ${materialName}`);
+                    // Mark this as fallback data
+                    const disposalDataWithFlag = {
+                        ...data.disposal_data,
+                        isFallbackData: true
+                    };
+                    return disposalDataWithFlag;
+                } else {
+                    console.log(`[Disposal Methods] ❌ No disposal method found with fallback data for ${materialName}`);
+                    return null;
+                }
+            }
+            
+            console.log(`[Disposal Methods] 📊 Using stored climate data:`);
+            console.log(`  Climate Zone: ${climateData.climateZone}`);
+            console.log(`  Temperature: ${climateData.temperature.average}°${climateData.temperature.unit}`);
+            console.log(`  Humidity: ${climateData.humidity}%`);
+            console.log(`  Stored Location: ${storedLocation ? `${storedLocation.latitude},${storedLocation.longitude}` : 'Not available'}`);
+            console.log(`  Data is Fresh: ${isDataFresh ? 'Yes' : 'No'}`);
+            console.log(`  Current Location: ${location ? `${location.latitude},${location.longitude}` : 'Not available'}`);
+            
+            const requestBody = {
+                material_name: materialName,
+                climate_classification: climateData.climateZone,
+                climate_location: storedLocation ? `${storedLocation.latitude},${storedLocation.longitude}` : '0,0'
+            };
+            
+            console.log(`[Disposal Methods] 📤 Sending request to /disposal/check:`, requestBody);
+            
+            const response = await fetch(`${API_BASE_URL}/disposal/check`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody)
+            });
+            
+            console.log(`[Disposal Methods] 📥 Response status: ${response.status} ${response.statusText}`);
+            
+            if (!response.ok) {
+                console.error(`[Disposal Methods] ❌ HTTP error: ${response.status} ${response.statusText}`);
+                throw new Error(`Failed to fetch disposal methods: ${response.status} ${response.statusText}`);
+            }
+            
             const data = await response.json();
-            // Handle both string and object responses
-            return typeof data === 'string' ? data : data.methods || '';
+            console.log(`[Disposal Methods] 📋 Response data:`, data);
+            
+            if (data.found && data.disposal_data) {
+                console.log(`[Disposal Methods] ✅ Found disposal method for ${materialName} using stored climate data (${climateData.climateZone})`);
+                console.log(`[Disposal Methods] 📝 Disposal method details:`);
+                console.log(`  ID: ${data.disposal_data.id}`);
+                console.log(`  Material: ${data.disposal_data.material_name}`);
+                console.log(`  Climate: ${data.disposal_data.climate_classification}`);
+                console.log(`  Location: ${data.disposal_data.climate_location}`);
+                console.log(`  Steps count: ${data.disposal_data.disposal_steps?.length || 0}`);
+                console.log(`  Created: ${data.disposal_data.created_at}`);
+                console.log(`[Disposal Methods] 🏪 Data source: Stored climate data (${isDataFresh ? 'fresh' : 'stale'})`);
+                // Mark this as stored climate data (not fallback)
+                const disposalDataWithFlag = {
+                    ...data.disposal_data,
+                    isFallbackData: false,
+                    isStoredData: true
+                };
+                return disposalDataWithFlag;
+            } else {
+                console.log(`[Disposal Methods] ❌ No disposal method found for ${materialName} using stored climate data (${climateData.climateZone})`);
+                console.log(`[Disposal Methods] 💡 Consider generating new disposal method for this material/climate combination`);
+                return null;
+            }
         } catch (error) {
-            console.error('Error fetching disposal methods:', error);
-            return '';
+            console.error('[Disposal Methods] ❌ Error fetching disposal methods:', error);
+            console.error('[Disposal Methods] 🔍 Error details:', {
+                message: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            return null;
         }
     };
 
@@ -504,8 +658,8 @@ export default function DetailScreen() {
                         console.log('[Detail Page] Scan data material:', {
                             id: material?.id,
                             name: material?.Name,
-                            hasImageUrl: !!material?.imageUrl,
-                            imageUrl: material?.imageUrl ? 'Present' : 'Missing'
+                            hasImageUrl: !!material?.ImageUrl,
+                            imageUrl: material?.ImageUrl ? 'Present' : 'Missing'
                         });
                         
                         if (!materialId) {
@@ -532,7 +686,7 @@ export default function DetailScreen() {
                 // Fetch remaining data in parallel
                 const [projects, disposalMethods, relatedMaterials] = await Promise.all([
                     fetchRecyclingProjects(materialId, materialDetails?.Name),
-                    fetchDisposalMethods(materialId),
+                    fetchDisposalMethods(materialDetails?.Name || materialId),
                     fetchRelatedMaterials(materialId)
                 ]);
                 
@@ -546,8 +700,7 @@ export default function DetailScreen() {
                 
                 console.log('[Detail Page] Page data loaded successfully:', {
                     materialName: pageData.material.Name,
-                    hasImageUrl: !!pageData.material.imageUrl,
-                    imageSource: pageData.material.imageUrl ? (pageData.material.imageUrl.includes('unsplash') ? 'Unsplash API' : 'Other') : 'None',
+                    hasImageUrl: !!pageData.material.ImageUrl,
                     hasImageOptions: !!pageData.material.ImageOptions,
                     imageOptionsCount: pageData.material.ImageOptions?.length || 0,
                     projectsCount: pageData.recyclingProjects.length,
@@ -686,20 +839,18 @@ export default function DetailScreen() {
             {/* Top Division */}
             <ThemedView style={styles.topDivision}>
                 <ThemedView style={styles.imageBox}>
-                    {pageData.material.imageUrl ? (
+                    {pageData.material.ImageUrl ? (
                         <Image 
-                            source={{ uri: pageData.material.imageUrl }} 
+                            source={{ uri: pageData.material.ImageUrl }} 
                             style={styles.materialImage}
                             resizeMode="cover"
                             onLoad={() => {
                                 console.log(`[Material Image] Successfully loaded image for ${pageData.material.Name}`);
-                                console.log(`[Material Image] Image URL: ${pageData.material.imageUrl || 'N/A'}`);
-                                console.log(`[Material Image] Image source: ${pageData.material.imageUrl?.includes('unsplash') ? 'Unsplash API' : 'Other source'}`);
+                                console.log(`[Material Image] Image URL: ${pageData.material.ImageUrl || 'N/A'}`);
                             }}
                             onError={(error) => {
                                 console.error(`[Material Image] Failed to load image for ${pageData.material.Name}:`, error);
-                                console.error(`[Material Image] Failed URL: ${pageData.material.imageUrl || 'N/A'}`);
-                                console.error(`[Material Image] Image source: ${pageData.material.imageUrl?.includes('unsplash') ? 'Unsplash API' : 'Other source'}`);
+                                console.error(`[Material Image] Failed URL: ${pageData.material.ImageUrl || 'N/A'}`);
                             }}
                         />
                     ) : (
@@ -792,9 +943,59 @@ export default function DetailScreen() {
             {/* Bottom Division */}
             <ThemedView style={styles.bottomDivision}>
                 <ThemedText type="title" style={styles.sectionTitle}>Disposal Methods</ThemedText>
-                <ThemedText style={styles.disposalText}>
-                    {pageData.disposalMethods || 'No disposal methods available for this material.'}
-                </ThemedText>
+                {(() => {
+                    if (pageData.disposalMethods) {
+                        const isFallback = pageData.disposalMethods.isFallbackData;
+                        const isStored = (pageData.disposalMethods as any).isStoredData;
+                        console.log(`[Disposal Methods UI] ✅ Rendering disposal methods for ${pageData.material.Name}`);
+                        console.log(`[Disposal Methods UI] 📊 Displaying ${pageData.disposalMethods.disposal_steps?.length || 0} disposal steps`);
+                        
+                        if (isFallback) {
+                            console.log(`[Disposal Methods UI] ⚠️ Using FALLBACK/DEFAULT climate data`);
+                            console.log(`[Disposal Methods UI] 🌡️ Climate: ${pageData.disposalMethods.climate_classification} (default)`);
+                        } else if (isStored) {
+                            console.log(`[Disposal Methods UI] ✅ Using STORED climate data`);
+                            console.log(`[Disposal Methods UI] 🌡️ Climate: ${pageData.disposalMethods.climate_classification} (stored, ${isDataFresh ? 'fresh' : 'stale'})`);
+                        } else {
+                            console.log(`[Disposal Methods UI] ✅ Using ACTUAL climate data`);
+                            console.log(`[Disposal Methods UI] 🌡️ Climate: ${pageData.disposalMethods.climate_classification} (detected)`);
+                        }
+                        
+                        return (
+                            <ThemedView style={styles.disposalContainer}>
+                                <ThemedView style={styles.disposalHeader}>
+                                    <ThemedText style={styles.disposalClimate}>
+                                        Climate: {pageData.disposalMethods.climate_classification}
+                                    </ThemedText>
+                                </ThemedView>
+                                <ThemedText style={styles.disposalStepsTitle}>Disposal Steps:</ThemedText>
+                                {pageData.disposalMethods.disposal_steps.map((step, index) => {
+                                    console.log(`[Disposal Methods UI] 📝 Rendering step ${index + 1}: ${step.substring(0, 50)}...`);
+                                    return (
+                                        <ThemedView key={index} style={styles.disposalStep}>
+                                            <ThemedText style={styles.disposalStepNumber}>{index + 1}.</ThemedText>
+                                            <ThemedText style={styles.disposalStepText}>{step}</ThemedText>
+                                        </ThemedView>
+                                    );
+                                })}
+                            </ThemedView>
+                        );
+                    } else {
+                        console.log(`[Disposal Methods UI] ❌ No disposal methods available for ${pageData.material.Name}`);
+                        console.log(`[Disposal Methods UI] 💡 This could be because:`);
+                        console.log(`  - No disposal method exists for this material/climate combination`);
+                        console.log(`  - Climate data is not available (${!climateData ? 'MISSING' : 'AVAILABLE'})`);
+                        console.log(`  - Location data is not available (${!location ? 'MISSING' : 'AVAILABLE'})`);
+                        console.log(`[Disposal Methods UI] 🔍 Climate data status: ${climateData ? '✅ Available' : '❌ Missing'}`);
+                        console.log(`[Disposal Methods UI] 📍 Location data status: ${location ? '✅ Available' : '❌ Missing'}`);
+                        
+                        return (
+                            <ThemedText style={styles.disposalText}>
+                                No disposal methods available for this material in your current climate.
+                            </ThemedText>
+                        );
+                    }
+                })()}
             </ThemedView>
             </ScrollView>
         </ThemedView>
@@ -1081,6 +1282,51 @@ const styles = StyleSheet.create({
         color: '#333',
         lineHeight: 24,
         textAlign: 'justify',
+    },
+    disposalContainer: {
+        marginTop: 10,
+    },
+    disposalHeader: {
+        backgroundColor: '#f8f9fa',
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 16,
+        borderLeftWidth: 4,
+        borderLeftColor: '#007AFF',
+    },
+    disposalClimate: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#007AFF',
+        marginBottom: 4,
+    },
+    disposalLocation: {
+        fontSize: 12,
+        color: '#666',
+    },
+    disposalStepsTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 12,
+    },
+    disposalStep: {
+        flexDirection: 'row',
+        marginBottom: 8,
+        paddingLeft: 8,
+    },
+    disposalStepNumber: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#007AFF',
+        width: 24,
+        marginRight: 8,
+    },
+    disposalStepText: {
+        flex: 1,
+        fontSize: 14,
+        color: '#333',
+        lineHeight: 20,
     },
     generateProjectSection: {
         marginTop: 20,

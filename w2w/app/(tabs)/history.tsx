@@ -19,7 +19,7 @@ interface MaterialData {
   id: string;
   Name: string;
   Traits: string[];
-  imageUrl?: string;
+  ImageUrl?: string;
 }
 
 interface RecyclingProject {
@@ -217,7 +217,7 @@ export default function HistoryScreen() {
                 activeOpacity={0.7}
               >
                 <Image
-                  source={scanItem.material.imageUrl ? { uri: scanItem.material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
+                  source={scanItem.material.ImageUrl ? { uri: scanItem.material.ImageUrl } : require('@/assets/images/partial-react-logo.png')}
                   style={styles.scanCardImage}
                   resizeMode="cover"
                 />

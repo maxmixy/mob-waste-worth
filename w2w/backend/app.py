@@ -11,6 +11,8 @@ from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+from google import genai
+from google.genai import types
 
 import json as _json
 #Database (Firestore) setup
@@ -53,13 +55,21 @@ def init_firestore():
         print("Firestore init failed:", e)
         return None
 
+def init_gemini():
+    """Initialize Gemini API"""
+    try:
+        client = genai.Client(api_key="AIzaSyDRT3lI3JrVKvg41ZbIp1l2Hibilae7EWU")
+    
+        print("Gemini API initialized successfully")
+        return True
+    except Exception as e:
+        print(f"Error initializing Gemini API: {e}")
+        return False
+
 db = init_firestore()
 
-#Gemini API setup
-from google import genai
-from google.genai import types
-
-client = genai.Client(api_key="AIzaSyDRT3lI3JrVKvg41ZbIp1l2Hibilae7EWU")
+# Initialize Gemini API
+gemini_initialized = init_gemini()
 
 # Unsplash API setup
 UNSPLASH_ACCESS_KEY = "1iBibObcGpjQYY_WbLkzlqZNIJ5I0AGoCMYu4o2JHec"  # Replace with your actual access key
@@ -227,44 +237,6 @@ def search_unsplash_for_material(material_name, num_images=3):
         print(f"Error in search_unsplash_for_material: {e}")
         return None
 
-def ensure_material_has_image_url_field(material_doc, db):
-    """Ensure a material document has the ImageUrl field, add it if missing, and fill it if empty"""
-    try:
-        data = material_doc.to_dict()
-        doc_id = material_doc.id
-        material_name = data.get('Name', '')
-        
-        # Check if ImageUrl field exists
-        if 'ImageUrl' not in data:
-            print(f"[Image Field] Adding missing ImageUrl field to material document: {doc_id}")
-            material_doc.reference.update({'ImageUrl': ''})
-            data['ImageUrl'] = ''
-            print(f"[Image Field] ✅ Added ImageUrl field to document: {doc_id}")
-        else:
-            print(f"[Image Field] ImageUrl field already exists in document: {doc_id}")
-        
-        # Check if ImageUrl is empty and try to fill it with Unsplash image
-        if not data.get('ImageUrl') or not data.get('ImageUrl').strip():
-            print(f"[Image Field] ImageUrl is empty for material '{material_name}', attempting to fill with Unsplash image...")
-            if material_name:
-                images = search_unsplash_for_material(material_name)
-                if images and len(images) > 0:
-                    # Use the first image as default for existing materials
-                    image_url = images[0]['url']
-                    print(f"[Image Field] ✅ Found Unsplash image for '{material_name}': {image_url}")
-                    material_doc.reference.update({'ImageUrl': image_url})
-                    data['ImageUrl'] = image_url
-                    print(f"[Image Field] ✅ Updated document {doc_id} with image URL")
-                else:
-                    print(f"[Image Field] ❌ No Unsplash images found for '{material_name}'")
-            else:
-                print(f"[Image Field] ❌ No material name available for image search")
-            
-        return data
-        
-    except Exception as e:
-        print(f"[Image Field] Error ensuring ImageUrl field: {e}")
-        return material_doc.to_dict()
 
 def get_or_create_material_image_url(material_name, db):
     """Get existing image URL for material or create new one via Unsplash search"""
@@ -281,7 +253,6 @@ def get_or_create_material_image_url(material_name, db):
             data = doc.to_dict()
             if data.get('ImageUrl') and data.get('ImageUrl').strip():  # Check for non-empty string
                 print(f"[Image Cache] ✅ Found cached image URL for '{material_name}': {data['ImageUrl']}")
-                print(f"[Image Cache] Image source: {'Unsplash API' if 'unsplash' in data['ImageUrl'] else 'Other'}")
                 return data['ImageUrl']
         
         # If no existing valid image URL, search Unsplash
@@ -302,7 +273,6 @@ def get_or_create_material_image_url(material_name, db):
                 updated_count += 1
                 
             print(f"[Image Cache] ✅ Updated {updated_count} materials with name '{material_name}' to include image URL")
-            print(f"[Image Cache] Cached image URL: {image_url}")
             return image_url
         else:
             print(f"[Image Cache] ❌ No images found for '{material_name}'")
@@ -554,10 +524,8 @@ def upload():
         docs = query.stream()
         materials = []
         for doc in docs:
-            # Ensure each material document has the ImageUrl field
-            material_data = ensure_material_has_image_url_field(doc, db)
+            material_data = doc.to_dict()
             materials.append({**material_data, 'id': doc.id})
-        print("Materials found:", materials)
         if not materials:
             material_name = material.get('Name')
             if not material_name:
@@ -574,7 +542,6 @@ def upload():
                     'ImageUrl': '',  # Will be set after user selection
                     'ImageOptions': images  # Multiple image options
                 }
-                print("New material with image options:", material_data)
                 return jsonify({
                     'Scanned Material': [material_data], 
                     'inserted': False,  # Not inserted yet, waiting for user selection
@@ -591,7 +558,6 @@ def upload():
                 doc_ref = db.collection('Materials').document()
                 doc_ref.set(doc_data)
                 inserted_doc = {**doc_data, 'id': doc_ref.id}
-                print("Inserted new material without image:", inserted_doc)
                 return jsonify({'Scanned Material': [inserted_doc], 'inserted': True})
 
         # Check if any of the found materials need image URLs
@@ -641,15 +607,11 @@ def log_scan():
                 db.collection('User_collection').document(userId).update({
                     'Materials': materials
                 })
-                print(f"Added material {materialId} to user {userId}")
-                
-            print(f"Material {materialId} already exists for user {userId}")
         else:
             # Create new user document
             db.collection('User_collection').document(userId).set({
                 'Materials': [materialId]
             })
-            print(f"Created new user document for {userId} with material {materialId}")
         
         return jsonify({'success': True, 'message': 'Scan logged successfully'})
         
@@ -673,8 +635,7 @@ def get_material_details(material_id):
             docs = db.collection('Materials').where('Name', '==', material_id).stream()
             materials = []
             for doc in docs:
-                # Ensure each material document has the ImageUrl field
-                material_data = ensure_material_has_image_url_field(doc, db)
+                material_data = doc.to_dict()
                 materials.append(material_data)
             
             if materials:
@@ -682,14 +643,12 @@ def get_material_details(material_id):
             else:
                 return jsonify({'error': 'Material not found'}), 404
         else:
-            # Ensure the material document has the ImageUrl field
-            material_data = ensure_material_has_image_url_field(material_doc, db)
-            material_data = {**material_data, 'id': material_doc.id}
+            material_data = {**material_doc.to_dict(), 'id': material_doc.id}
+        
         
         return jsonify(material_data)
         
     except Exception as e:
-        print(f"Error fetching material details: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -838,8 +797,7 @@ def get_related_materials(material_id):
         
         for doc in all_materials:
             if doc.id != material_id:
-                # Ensure each material document has the ImageUrl field
-                material_data = ensure_material_has_image_url_field(doc, db)
+                material_data = doc.to_dict()
                 # Check for trait overlap
                 if has_trait_overlap(current_material.get('Traits', []), material_data.get('Traits', [])):
                     related_materials.append({
@@ -877,6 +835,145 @@ def get_user_materials(user_id):
         print(f"Error fetching user materials: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/user/<user_id>/location', methods=['POST'])
+def update_user_location(user_id):
+    """Update user's location data"""
+    try:
+        data = request.get_json()
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        accuracy = data.get('accuracy')
+        timestamp = data.get('timestamp')
+        
+        if not all([latitude, longitude]):
+            return jsonify({'error': 'Latitude and longitude are required'}), 400
+        
+        # Update user document with location data
+        location_data = {
+            'latitude': latitude,
+            'longitude': longitude,
+            'accuracy': accuracy,
+            'timestamp': timestamp,
+            'lastUpdated': datetime.now().isoformat()
+        }
+        
+        # Check if user document exists, create if not
+        user_doc = db.collection('User_collection').document(user_id).get()
+        if user_doc.exists:
+            # Update existing user document
+            db.collection('User_collection').document(user_id).update({
+                'location': location_data
+            })
+        else:
+            # Create new user document with location data
+            db.collection('User_collection').document(user_id).set({
+                'location': location_data,
+                'Materials': []
+            })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Location updated successfully',
+            'location': location_data
+        })
+        
+    except Exception as e:
+        print(f"Error updating user location: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/user/<user_id>/project/<project_id>/progress', methods=['GET'])
+def get_project_progress(user_id, project_id):
+    """Get project progress for a user"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_doc.to_dict()
+        progress_data = user_data.get('project_progress', {}).get(project_id)
+        
+        if not progress_data:
+            return jsonify({'error': 'No progress found for this project'}), 404
+        
+        return jsonify(progress_data)
+        
+    except Exception as e:
+        print(f"Error fetching project progress: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/user/<user_id>/project/<project_id>/progress', methods=['POST'])
+def update_project_progress(user_id, project_id):
+    """Update project progress for a user"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        data = request.get_json()
+        step_index = data.get('stepIndex')
+        is_completed = data.get('isCompleted')
+        timestamp = data.get('timestamp')
+        
+        if step_index is None or is_completed is None:
+            return jsonify({'error': 'stepIndex and isCompleted are required'}), 400
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_doc.to_dict()
+        project_progress = user_data.get('project_progress', {})
+        
+        # Get or create progress for this project
+        if project_id not in project_progress:
+            project_progress[project_id] = {
+                'projectId': project_id,
+                'completedSteps': [],
+                'currentStep': 0,
+                'startedAt': timestamp or datetime.now().isoformat(),
+                'lastUpdated': timestamp or datetime.now().isoformat(),
+                'isCompleted': False
+            }
+        
+        progress = project_progress[project_id]
+        
+        # Update progress
+        if is_completed:
+            # When marking a step as completed, mark all previous steps as completed too
+            for i in range(step_index + 1):
+                if i not in progress['completedSteps']:
+                    progress['completedSteps'].append(i)
+        else:
+            # When unmarking a step, also unmark all subsequent steps
+            progress['completedSteps'] = [step for step in progress['completedSteps'] if step < step_index]
+        
+        # Update current step (next incomplete step)
+        progress['completedSteps'].sort()
+        progress['currentStep'] = len(progress['completedSteps'])
+        progress['lastUpdated'] = timestamp or datetime.now().isoformat()
+        
+        # Check if project is completed
+        # Get project to know total steps
+        project_doc = db.collection('Recycling').document(project_id).get()
+        if project_doc.exists:
+            project_data = project_doc.to_dict()
+            total_steps = len(project_data.get('steps', []))
+            progress['isCompleted'] = len(progress['completedSteps']) >= total_steps
+        
+        # Update user document
+        db.collection('User_collection').document(user_id).update({
+            'project_progress': project_progress
+        })
+        
+        return jsonify(progress)
+        
+    except Exception as e:
+        print(f"Error updating project progress: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/user/<user_id>', methods=['GET'])
 def get_user_data(user_id):
@@ -915,12 +1012,6 @@ def get_recycling_project(project_id):
         
         project_data = project_doc.to_dict()
         project_data['id'] = project_doc.id
-        
-        print(f"Retrieved project from database: {project_data}")
-        print(f"Retrieved project steps: {project_data.get('steps', [])}")
-        if project_data.get('steps'):
-            print(f"Retrieved project first step length: {len(str(project_data['steps'][0]))}")
-            print(f"Retrieved project first step content: {str(project_data['steps'][0])}")
         
         return jsonify(project_data)
         
@@ -2543,6 +2634,591 @@ def serve_post_image(filename):
         print(f"Error serving post image {filename}: {e}")
         return jsonify({'error': 'Image not found'}), 404
 
+
+# =============================================================================
+# DISPOSAL API ENDPOINTS
+# =============================================================================
+
+@app.route('/disposal/check', methods=['POST'])
+def check_disposal_method():
+    """Check if disposal method exists in database"""
+    try:
+        data = request.get_json()
+        material_name = data.get('material_name')
+        climate_classification = data.get('climate_classification')
+        climate_location = data.get('climate_location')
+        
+        print(f"[Disposal API] 🔍 Checking disposal method for:")
+        print(f"  Material: {material_name}")
+        print(f"  Climate: {climate_classification}")
+        print(f"  Location: {climate_location}")
+        
+        if not all([material_name, climate_classification, climate_location]):
+            print(f"[Disposal API] ❌ Missing required fields:")
+            print(f"  material_name: {bool(material_name)}")
+            print(f"  climate_classification: {bool(climate_classification)}")
+            print(f"  climate_location: {bool(climate_location)}")
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # Query the disposal collection
+        disposal_ref = db.collection('Disposal')
+        query = disposal_ref.where('material_name', '==', material_name)\
+                           .where('climate_classification', '==', climate_classification)\
+                           .where('climate_location', '==', climate_location)
+        
+        print(f"[Disposal API] 🔎 Executing Firestore query...")
+        docs = query.get()
+        print(f"[Disposal API] 📊 Query returned {len(docs)} documents")
+        
+        if docs:
+            disposal_data = docs[0].to_dict()
+            disposal_data['id'] = docs[0].id
+            print(f"[Disposal API] ✅ Found existing disposal method:")
+            print(f"  ID: {docs[0].id}")
+            print(f"  Material: {disposal_data.get('material_name', 'Unknown')}")
+            print(f"  Climate: {disposal_data.get('climate_classification', 'Unknown')}")
+            print(f"  Location: {disposal_data.get('climate_location', 'Unknown')}")
+            print(f"  Steps count: {len(disposal_data.get('disposal_steps', []))}")
+            print(f"  Created: {disposal_data.get('created_at', 'Unknown')}")
+            print(f"  Updated: {disposal_data.get('updated_at', 'Unknown')}")
+            return jsonify({
+                'found': True,
+                'disposal_data': disposal_data
+            })
+        else:
+            print(f"[Disposal API] ❌ No disposal method found in database")
+            print(f"[Disposal API] 💡 Consider generating new disposal method for this material/climate combination")
+            return jsonify({
+                'found': False,
+                'message': 'No disposal method found'
+            })
+            
+    except Exception as e:
+        print(f"[Disposal API] Error checking disposal method: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/disposal/generate', methods=['POST'])
+def generate_disposal_steps():
+    """Generate disposal steps using AI"""
+    try:
+        data = request.get_json()
+        material_name = data.get('material_name')
+        climate_classification = data.get('climate_classification')
+        climate_location = data.get('climate_location')
+        temperature = data.get('temperature')
+        humidity = data.get('humidity')
+        precipitation = data.get('precipitation')
+        recycling_guidelines = data.get('recycling_guidelines', {})
+        disposal_tips = data.get('disposal_tips', [])
+        
+        print(f"[Disposal API] 🤖 Generating AI disposal steps for:")
+        print(f"  Material: {material_name}")
+        print(f"  Climate: {climate_classification}")
+        print(f"  Location: {climate_location}")
+        print(f"  Temperature: {temperature}°C")
+        print(f"  Humidity: {humidity}%")
+        print(f"  Precipitation: {precipitation}mm")
+        print(f"  Composting Available: {recycling_guidelines.get('composting', False)}")
+        print(f"  Acceptable Plastics: {', '.join(recycling_guidelines.get('plasticRecycling', []))}")
+        print(f"  Disposal Tips Count: {len(disposal_tips)}")
+        
+        if not all([material_name, climate_classification, climate_location]):
+            print(f"[Disposal API] ❌ Missing required fields:")
+            print(f"  material_name: {bool(material_name)}")
+            print(f"  climate_classification: {bool(climate_classification)}")
+            print(f"  climate_location: {bool(climate_location)}")
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # Create AI prompt for disposal steps
+        prompt = f"""
+        Generate detailed disposal steps for the material "{material_name}" in a {climate_classification} climate.
+        
+        Climate Conditions:
+        - Classification: {climate_classification}
+        - Location: {climate_location}
+        - Temperature: {temperature}°C
+        - Humidity: {humidity}%
+        - Precipitation: {precipitation}mm
+        
+        Recycling Guidelines:
+        - Composting Available: {recycling_guidelines.get('composting', False)}
+        - Acceptable Plastics: {', '.join(recycling_guidelines.get('plasticRecycling', []))}
+        - Hazardous Waste Types: {', '.join(recycling_guidelines.get('hazardousWaste', []))}
+        - Seasonal Considerations: {', '.join(recycling_guidelines.get('seasonalConsiderations', []))}
+        
+        Climate-Specific Tips: {', '.join(disposal_tips)}
+        
+        Please provide 5-8 specific, actionable disposal steps that consider:
+        1. The material type and its properties
+        2. The climate conditions and their impact on disposal
+        3. Environmental best practices
+        4. Safety considerations
+        5. Local recycling capabilities
+        
+        Format the response as a JSON array of strings, where each string is a clear, numbered step.
+        Example: ["1. Check if the material is recyclable in your area", "2. Clean the material thoroughly", ...]
+        """
+        
+        # Call AI service (you'll need to implement this based on your AI provider)
+        print(f"[Disposal API] 📝 Created AI prompt (length: {len(prompt)} characters)")
+        print(f"[Disposal API] 🧠 Calling AI to generate disposal steps...")
+        
+        disposal_steps = generate_ai_disposal_steps(prompt)
+        
+        print(f"[Disposal API] ✅ AI generated {len(disposal_steps)} disposal steps")
+        if disposal_steps and len(disposal_steps) > 0:
+            print(f"[Disposal API] 📋 First step: {disposal_steps[0]}")
+            print(f"[Disposal API] 📋 Last step: {disposal_steps[-1]}")
+        else:
+            print(f"[Disposal API] ⚠️ No disposal steps generated")
+        
+        return jsonify({
+            'success': True,
+            'disposal_steps': disposal_steps,
+            'material_name': material_name,
+            'climate_classification': climate_classification,
+            'climate_location': climate_location
+        })
+        
+    except Exception as e:
+        print(f"[Disposal API] Error generating disposal steps: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/disposal/save', methods=['POST'])
+def save_disposal_method():
+    """Save disposal method to database"""
+    try:
+        data = request.get_json()
+        
+        print(f"[Disposal API] 💾 Saving disposal method:")
+        print(f"  Material: {data.get('material_name')}")
+        print(f"  Climate: {data.get('climate_classification')}")
+        print(f"  Location: {data.get('climate_location')}")
+        print(f"  Steps count: {len(data.get('disposal_steps', []))}")
+        
+        # Validate required fields
+        required_fields = ['material_name', 'climate_classification', 'climate_location', 'disposal_steps']
+        missing_fields = []
+        for field in required_fields:
+            if field not in data:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            print(f"[Disposal API] ❌ Missing required fields: {missing_fields}")
+            return jsonify({'error': f'Missing required fields: {missing_fields}'}), 400
+        
+        # Add timestamp
+        timestamp = datetime.now().isoformat()
+        data['created_at'] = timestamp
+        data['updated_at'] = timestamp
+        print(f"[Disposal API] 📅 Added timestamps: {timestamp}")
+        
+        # Save to Firestore
+        print(f"[Disposal API] 🔥 Saving to Firestore Disposal collection...")
+        disposal_ref = db.collection('Disposal')
+        doc_ref = disposal_ref.add(data)
+        
+        print(f"[Disposal API] ✅ Successfully saved disposal method:")
+        print(f"  Document ID: {doc_ref[1].id}")
+        print(f"  Material: {data.get('material_name')}")
+        print(f"  Climate: {data.get('climate_classification')}")
+        print(f"  Steps: {len(data.get('disposal_steps', []))}")
+        
+        return jsonify({
+            'success': True,
+            'id': doc_ref[1].id,
+            'message': 'Disposal method saved successfully'
+        })
+        
+    except Exception as e:
+        print(f"[Disposal API] Error saving disposal method: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/disposal/material/<material_name>', methods=['GET'])
+def get_disposal_methods_for_material(material_name):
+    """Get all disposal methods for a specific material"""
+    try:
+        print(f"[Disposal API] Getting disposal methods for material: {material_name}")
+        
+        disposal_ref = db.collection('Disposal')
+        query = disposal_ref.where('material_name', '==', material_name)
+        docs = query.get()
+        
+        disposal_methods = []
+        for doc in docs:
+            disposal_data = doc.to_dict()
+            disposal_data['id'] = doc.id
+            disposal_methods.append(disposal_data)
+        
+        print(f"[Disposal API] Found {len(disposal_methods)} disposal methods for {material_name}")
+        
+        return jsonify({
+            'success': True,
+            'disposal_methods': disposal_methods
+        })
+        
+    except Exception as e:
+        print(f"[Disposal API] Error getting disposal methods for material: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/disposal/climate/<climate_classification>', methods=['GET'])
+def get_disposal_methods_for_climate(climate_classification):
+    """Get all disposal methods for a specific climate classification"""
+    try:
+        print(f"[Disposal API] Getting disposal methods for climate: {climate_classification}")
+        
+        disposal_ref = db.collection('Disposal')
+        query = disposal_ref.where('climate_classification', '==', climate_classification)
+        docs = query.get()
+        
+        disposal_methods = []
+        for doc in docs:
+            disposal_data = doc.to_dict()
+            disposal_data['id'] = doc.id
+            disposal_methods.append(disposal_data)
+        
+        print(f"[Disposal API] Found {len(disposal_methods)} disposal methods for {climate_classification}")
+        
+        return jsonify({
+            'success': True,
+            'disposal_methods': disposal_methods
+        })
+        
+    except Exception as e:
+        print(f"[Disposal API] Error getting disposal methods for climate: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def generate_ai_disposal_steps(prompt):
+    """Generate disposal steps using Gemini AI"""
+    try:
+        if not gemini_initialized:
+            print("[Gemini] API not initialized, using fallback")
+            return generate_fallback_steps(prompt)
+        
+        print(f"[Gemini] Generating disposal steps with prompt length: {len(prompt)}")
+        
+        # Generate content using the correct API
+        response = genai.generate_text(
+            model='models/text-bison-001',
+            prompt=prompt,
+            temperature=0.7,
+            max_output_tokens=1024
+        )
+        
+        if response and response.result:
+            print(f"[Gemini] Generated response: {len(response.result)} characters")
+            
+            # Parse the response to extract disposal steps
+            disposal_steps = parse_gemini_response(response.result)
+            
+            if disposal_steps:
+                print(f"[Gemini] Successfully parsed {len(disposal_steps)} disposal steps")
+                return disposal_steps
+            else:
+                print("[Gemini] Failed to parse response, using fallback")
+                return generate_fallback_steps(prompt)
+        else:
+            print("[Gemini] No response text received, using fallback")
+            return generate_fallback_steps(prompt)
+            
+    except Exception as e:
+        print(f"[Gemini] Error generating disposal steps: {e}")
+        return generate_fallback_steps(prompt)
+
+def parse_gemini_response(response_text):
+    """Parse Gemini response to extract disposal steps"""
+    try:
+        # Try to parse as JSON first
+        if response_text.strip().startswith('[') and response_text.strip().endswith(']'):
+            import json
+            steps = json.loads(response_text.strip())
+            if isinstance(steps, list):
+                return steps
+        
+        # If not JSON, try to extract numbered steps
+        lines = response_text.split('\n')
+        steps = []
+        
+        for line in lines:
+            line = line.strip()
+            # Look for numbered steps (1., 2., etc.)
+            if line and (line[0].isdigit() or line.startswith('•') or line.startswith('-') or line.startswith('*')):
+                # Clean up the line
+                if line[0].isdigit():
+                    # Remove number prefix
+                    step = line.split('.', 1)[1].strip() if '.' in line else line
+                else:
+                    # Remove bullet point
+                    step = line[1:].strip()
+                
+                if step:
+                    steps.append(step)
+        
+        # If we found steps, return them
+        if steps:
+            return steps
+        
+        # If no numbered steps found, split by sentences
+        sentences = response_text.split('.')
+        steps = []
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if sentence and len(sentence) > 10:  # Filter out very short sentences
+                steps.append(sentence + '.')
+        
+        return steps[:8]  # Limit to 8 steps
+        
+    except Exception as e:
+        print(f"[Gemini] Error parsing response: {e}")
+        return None
+
+def generate_fallback_steps(prompt):
+    """Generate fallback disposal steps when Gemini fails"""
+    material_name = prompt.split('"')[1] if '"' in prompt else "material"
+    climate = "temperate" if "temperate" in prompt.lower() else "tropical"
+    
+    example_steps = [
+        f"1. Identify the type of {material_name} and check for any hazardous components",
+        f"2. Clean the {material_name} thoroughly to remove any contaminants",
+        f"3. Check local recycling guidelines for {material_name} in your area",
+        f"4. Separate any recyclable parts from non-recyclable components",
+        f"5. Store the {material_name} in appropriate containers based on climate conditions",
+        f"6. Contact local waste management for proper disposal instructions",
+        f"7. Consider upcycling or repurposing the {material_name} if possible",
+        f"8. Document the disposal process for future reference"
+    ]
+    
+    return example_steps
+
+@app.route('/materials/unique', methods=['GET'])
+def get_unique_materials():
+    """Get all unique material names from Materials collection"""
+    try:
+        print("[Materials API] Getting unique materials from Materials collection...")
+        
+        # Get all materials directly from Materials collection
+        materials_ref = db.collection('Materials')
+        materials = materials_ref.get()
+        
+        unique_materials = set()
+        
+        for material_doc in materials:
+            try:
+                material_data = material_doc.to_dict()
+                material_name = material_data.get('Name', '')
+                if material_name:
+                    unique_materials.add(material_name)
+            except Exception as e:
+                print(f"[Materials API] Error processing material {material_doc.id}: {e}")
+                continue
+        
+        unique_materials_list = list(unique_materials)
+        print(f"[Materials API] Found {len(unique_materials_list)} unique materials")
+        
+        return jsonify({
+            'success': True,
+            'materials': unique_materials_list,
+            'count': len(unique_materials_list)
+        })
+        
+    except Exception as e:
+        print(f"[Materials API] Error getting unique materials: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/disposal/populate-tropical', methods=['POST'])
+def populate_tropical_disposal():
+    """Populate disposal table for all unique materials in tropical climate"""
+    try:
+        print("[Disposal API] Starting tropical disposal table population...")
+        
+        # Get all unique materials directly from Materials collection
+        materials_ref = db.collection('Materials')
+        materials = materials_ref.get()
+        
+        unique_materials = set()
+        
+        for material_doc in materials:
+            try:
+                material_data = material_doc.to_dict()
+                material_name = material_data.get('Name', '')
+                if material_name:
+                    unique_materials.add(material_name)
+            except Exception as e:
+                print(f"[Disposal API] Error processing material {material_doc.id}: {e}")
+                continue
+        
+        unique_materials_list = list(unique_materials)
+        print(f"[Disposal API] Found {len(unique_materials_list)} unique materials to process")
+        
+        # Check existing tropical disposal entries
+        disposal_ref = db.collection('Disposal')
+        existing_query = disposal_ref.where('climate_classification', '==', 'Tropical')
+        existing_docs = existing_query.get()
+        existing_materials = set()
+        
+        for doc in existing_docs:
+            disposal_data = doc.to_dict()
+            existing_materials.add(disposal_data.get('material_name', ''))
+        
+        # Filter out materials that already have tropical disposal entries
+        materials_to_process = [m for m in unique_materials_list if m not in existing_materials]
+        
+        print(f"[Disposal API] Processing {len(materials_to_process)} new materials (skipping {len(existing_materials)} existing)")
+        
+        results = {
+            'processed': len(materials_to_process),
+            'successful': 0,
+            'failed': 0,
+            'errors': [],
+            'skipped': len(existing_materials)
+        }
+        
+        # Process each material
+        for material_name in materials_to_process:
+            try:
+                # Generate disposal steps for tropical climate
+                disposal_steps = generate_tropical_disposal_steps(material_name)
+                
+                # Create disposal entry
+                disposal_data = {
+                    'climate_classification': 'Tropical',
+                    'climate_location': '0,0',  # Generic tropical location
+                    'material_name': material_name,
+                    'disposal_steps': disposal_steps,
+                    'created_at': datetime.now().isoformat(),
+                    'updated_at': datetime.now().isoformat()
+                }
+                
+                # Save to database
+                disposal_ref.add(disposal_data)
+                results['successful'] += 1
+                print(f"[Disposal API] ✅ Created disposal entry for: {material_name}")
+                
+            except Exception as e:
+                results['failed'] += 1
+                error_msg = f"Error processing {material_name}: {str(e)}"
+                results['errors'].append(error_msg)
+                print(f"[Disposal API] ❌ {error_msg}")
+        
+        print(f"[Disposal API] Population complete: {results}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Tropical disposal table population completed',
+            'results': results
+        })
+        
+    except Exception as e:
+        print(f"[Disposal API] Error in population process: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def generate_tropical_disposal_steps(material_name):
+    """Generate disposal steps for tropical climate using Gemini AI"""
+    try:
+        if not gemini_initialized:
+            print("[Gemini] API not initialized for tropical steps, using fallback")
+            return generate_tropical_fallback_steps(material_name)
+        
+        # Create a specific prompt for tropical climate disposal
+        prompt = f"""
+        Generate detailed disposal steps for the material "{material_name}" in a Tropical climate.
+        
+        Climate Conditions:
+        - Classification: Tropical
+        - Temperature: 28°C average (22-35°C range)
+        - Humidity: 75%
+        - Precipitation: 150mm
+        - Location: Tropical region
+        
+        Tropical Climate Considerations:
+        - High humidity and heat year-round
+        - Rainy seasons affect collection schedules
+        - Rapid decomposition of organic materials
+        - Mold and bacterial growth concerns
+        - Pest issues with organic waste
+        - Heat-sensitive material storage needs
+        
+        Recycling Guidelines for Tropical Climate:
+        - Composting Available: Yes
+        - Acceptable Plastics: PET, HDPE, PP, LDPE, PS, PVC
+        - Hazardous Waste Types: Batteries, Electronics, Chemicals, Paint, Pesticides, Pool chemicals
+        - Seasonal Considerations: Year-round composting, High humidity storage, Rainy season considerations
+        
+        Please provide 6-8 specific, actionable disposal steps that consider:
+        1. The material type and its properties
+        2. Tropical climate conditions (high humidity, heat, rainy seasons)
+        3. Environmental best practices for tropical regions
+        4. Safety considerations in hot, humid conditions
+        5. Local recycling capabilities in tropical areas
+        6. Storage requirements to prevent mold, pests, and degradation
+        
+        Format the response as a JSON array of strings, where each string is a clear, numbered step.
+        Example: ["1. Check if the material is recyclable in your area", "2. Clean the material thoroughly", ...]
+        """
+        
+        print(f"[Gemini] Generating tropical disposal steps for: {material_name}")
+        
+        # Generate content using the correct API
+        response = genai.generate_text(
+            model='models/text-bison-001',
+            prompt=prompt,
+            temperature=0.7,
+            max_output_tokens=1024
+        )
+        
+        if response and response.result:
+            print(f"[Gemini] Generated tropical response: {len(response.result)} characters")
+            
+            # Parse the response to extract disposal steps
+            disposal_steps = parse_gemini_response(response.result)
+            
+            if disposal_steps:
+                print(f"[Gemini] Successfully parsed {len(disposal_steps)} tropical disposal steps")
+                return disposal_steps
+            else:
+                print("[Gemini] Failed to parse tropical response, using fallback")
+                return generate_tropical_fallback_steps(material_name)
+        else:
+            print("[Gemini] No tropical response text received, using fallback")
+            return generate_tropical_fallback_steps(material_name)
+            
+    except Exception as e:
+        print(f"[Gemini] Error generating tropical disposal steps: {e}")
+        return generate_tropical_fallback_steps(material_name)
+
+def generate_tropical_fallback_steps(material_name):
+    """Generate fallback tropical disposal steps when Gemini fails"""
+    base_steps = [
+        f"1. Identify the type of {material_name} and check for any hazardous components",
+        f"2. Clean the {material_name} thoroughly to remove any contaminants",
+        f"3. Check local recycling guidelines for {material_name} in tropical climate conditions",
+        f"4. Separate any recyclable parts from non-recyclable components",
+        f"5. Store the {material_name} in airtight containers to prevent humidity damage",
+        f"6. Consider the rainy season schedule for waste collection",
+        f"7. Contact local waste management for proper disposal instructions",
+        f"8. Consider upcycling or repurposing the {material_name} if possible"
+    ]
+    
+    # Add climate-specific steps based on material type
+    material_lower = material_name.lower()
+    
+    if 'plastic' in material_lower or 'bottle' in material_lower or 'container' in material_lower:
+        base_steps.insert(5, f"5a. Rinse plastic containers thoroughly to prevent bacterial growth in high humidity")
+        base_steps.insert(6, f"5b. Dry completely before storage to prevent mold formation")
+    
+    if 'paper' in material_lower or 'cardboard' in material_lower:
+        base_steps.insert(5, f"5a. Store paper products in dry, well-ventilated areas")
+        base_steps.insert(6, f"5b. Use moisture-absorbing packets if available")
+    
+    if 'organic' in material_lower or 'food' in material_lower or 'compost' in material_lower:
+        base_steps.insert(5, f"5a. Use airtight composting containers to prevent pests")
+        base_steps.insert(6, f"5b. Turn compost regularly due to rapid decomposition in tropical heat")
+    
+    if 'electronic' in material_lower or 'battery' in material_lower:
+        base_steps.insert(5, f"5a. Store electronics in cool, dry places away from direct sunlight")
+        base_steps.insert(6, f"5b. Remove batteries before disposal to prevent corrosion")
+    
+    return base_steps
 
 if __name__ == '__main__':
     # Listen on all interfaces so the mobile device / emulator can reach it.
