@@ -8,6 +8,8 @@ import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId } from '@/lib/user';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import SettingsSidebar from '@/components/SettingsSidebar';
 import { ScrollView as RNScrollView } from 'react-native';
@@ -40,6 +42,7 @@ interface ScanHistoryItem {
 export default function HistoryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
+  const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);

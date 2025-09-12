@@ -8,6 +8,8 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, logoutUser, checkProfileCompletion } from '@/lib/user';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
+import { useLocation } from '@/hooks/useLocation';
+import { useClimate } from '@/hooks/useClimate';
 
 interface SettingsSidebarProps {
   visible: boolean;
@@ -20,6 +22,10 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
   const [userName, setUserName] = useState('User');
   const [userProfile, setUserProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  
+  // Location and climate functionality
+  const { location, error: locationError, loading: locationLoading, requestLocation } = useLocation();
+  const { climateData, loading: climateLoading, error: climateError, getClimateForLocation } = useClimate();
 
   useEffect(() => {
     if (visible) {
@@ -170,6 +176,19 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
     router.push('/pages/about');
   };
 
+  const handleLocationRequest = async () => {
+    try {
+      console.log('🌍 Requesting location from settings...');
+      await requestLocation();
+      if (location) {
+        console.log('🌍 Location obtained, getting climate data...');
+        await getClimateForLocation(location);
+      }
+    } catch (error) {
+      console.error('🌍 Error getting location:', error);
+    }
+  };
+
   return (
     <Modal
       visible={visible}
@@ -201,6 +220,103 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
             />
           </View>
           <ThemedText type="subtitle" style={styles.userName}>{userName}</ThemedText>
+        </ThemedView>
+
+        {/* Location Section */}
+        <ThemedView style={styles.locationSection}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>Location</ThemedText>
+          
+          {locationError && (
+            <ThemedView style={styles.locationErrorContainer}>
+              <MaterialIcons name="error" size={16} color="#f44336" />
+              <ThemedText style={styles.locationErrorText}>
+                {locationError.message}
+              </ThemedText>
+            </ThemedView>
+          )}
+          
+          {location ? (
+            <ThemedView style={styles.locationInfoContainer}>
+              <View style={styles.locationInfo}>
+                <MaterialIcons name="place" size={20} color={Colors[colorScheme].tint} />
+                <View style={styles.locationDetails}>
+                  <ThemedText style={styles.locationCoordinates}>
+                    {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+                  </ThemedText>
+                  {location.accuracy && (
+                    <ThemedText style={styles.locationAccuracy}>
+                      Accuracy: {location.accuracy.toFixed(0)}m
+                    </ThemedText>
+                  )}
+                </View>
+              </View>
+              
+              {/* Climate Information */}
+              {climateLoading && (
+                <ThemedView style={styles.climateLoadingContainer}>
+                  <MaterialIcons name="refresh" size={16} color={Colors[colorScheme].tint} />
+                  <ThemedText style={styles.climateLoadingText}>Getting climate data...</ThemedText>
+                </ThemedView>
+              )}
+              
+              {climateError && (
+                <ThemedView style={styles.climateErrorContainer}>
+                  <MaterialIcons name="warning" size={16} color="#ff9800" />
+                  <ThemedText style={styles.climateErrorText}>
+                    Climate data unavailable
+                  </ThemedText>
+                </ThemedView>
+              )}
+              
+              {climateData && (
+                <ThemedView style={styles.climateInfoContainer}>
+                  <View style={styles.climateHeader}>
+                    <MaterialIcons name="wb-sunny" size={16} color="#FF9800" />
+                    <ThemedText style={styles.climateZoneText}>
+                      {climateData.climateZone} Climate
+                    </ThemedText>
+                  </View>
+                  
+                  <View style={styles.climateDetails}>
+                    <View style={styles.climateDetailRow}>
+                      <MaterialIcons name="thermostat" size={14} color="#666" />
+                      <ThemedText style={styles.climateDetailText}>
+                        {climateData.temperature.average}°{climateData.temperature.unit}
+                      </ThemedText>
+                    </View>
+                    <View style={styles.climateDetailRow}>
+                      <MaterialIcons name="opacity" size={14} color="#666" />
+                      <ThemedText style={styles.climateDetailText}>
+                        {climateData.humidity}% humidity
+                      </ThemedText>
+                    </View>
+                  </View>
+                </ThemedView>
+              )}
+            </ThemedView>
+          ) : (
+            <ThemedView style={styles.locationEmptyState}>
+              <MaterialIcons name="location-off" size={24} color="#ccc" />
+              <ThemedText style={styles.locationEmptyText}>
+                No location data
+              </ThemedText>
+            </ThemedView>
+          )}
+          
+          <TouchableOpacity
+            style={[styles.locationButton, { backgroundColor: Colors[colorScheme].tint }]}
+            onPress={handleLocationRequest}
+            disabled={locationLoading}
+          >
+            <MaterialIcons 
+              name="my-location" 
+              size={16} 
+              color="white" 
+            />
+            <ThemedText style={styles.locationButtonText}>
+              {locationLoading ? 'Getting...' : 'Get Location'}
+            </ThemedText>
+          </TouchableOpacity>
         </ThemedView>
 
         {/* Menu Items */}
@@ -316,6 +432,141 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 18,
     fontWeight: '600',
+  },
+  locationSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  locationErrorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffebee',
+    padding: 8,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  locationErrorText: {
+    color: '#c62828',
+    fontSize: 12,
+    marginLeft: 6,
+    flex: 1,
+  },
+  locationInfoContainer: {
+    backgroundColor: '#f0f8ff',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e3f2fd',
+  },
+  locationInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  locationDetails: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  locationCoordinates: {
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: '#1976d2',
+    fontWeight: '600',
+  },
+  locationAccuracy: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 2,
+  },
+  locationEmptyState: {
+    alignItems: 'center',
+    padding: 12,
+    marginBottom: 12,
+  },
+  locationEmptyText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    gap: 6,
+  },
+  locationButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  climateLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
+    marginTop: 8,
+  },
+  climateLoadingText: {
+    fontSize: 10,
+    color: '#666',
+    marginLeft: 6,
+  },
+  climateErrorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff3e0',
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 8,
+  },
+  climateErrorText: {
+    color: '#f57c00',
+    fontSize: 10,
+    marginLeft: 6,
+    flex: 1,
+  },
+  climateInfoContainer: {
+    backgroundColor: '#f8f9fa',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  climateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  climateZoneText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginLeft: 4,
+  },
+  climateDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  climateDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  climateDetailText: {
+    fontSize: 10,
+    color: '#666',
+    marginLeft: 4,
   },
   menuContainer: {
     flex: 1,

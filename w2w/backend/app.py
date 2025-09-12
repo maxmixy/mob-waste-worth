@@ -8,16 +8,24 @@ import hashlib
 import requests
 from datetime import datetime
 from PIL import Image
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from google import genai
 from google.genai import types
+from google.genai.types import GenerationConfig
+
+generation_config = GenerationConfig(
+    response_mime_type="application/json"
+)
+
 
 import json as _json
 #Database (Firestore) setup
 import firebase_admin
 from firebase_admin import credentials, firestore
+
+
 
 def init_firestore():
     try:
@@ -57,6 +65,7 @@ def init_firestore():
 
 def init_gemini():
     """Initialize Gemini API"""
+    global client
     try:
         client = genai.Client(api_key="AIzaSyDRT3lI3JrVKvg41ZbIp1l2Hibilae7EWU")
     
@@ -2053,6 +2062,61 @@ def generate_new_quests():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/quests/reset', methods=['POST'])
+def reset_all_quests():
+    """Delete all existing quests and generate new ones with updated types"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        data = request.get_json() or {}
+        quests_to_generate = data.get('quests_to_generate', 20)  # Number of new quests to generate
+        
+        # Step 1: Delete all existing quests
+        print("🗑️ Deleting all existing quests...")
+        quests_ref = db.collection('Quests').stream()
+        deleted_count = 0
+        
+        for quest_doc in quests_ref:
+            quest_doc.reference.delete()
+            deleted_count += 1
+        
+        print(f"✅ Deleted {deleted_count} existing quests")
+        
+        # Step 2: Generate new quests with updated types
+        print(f"🎯 Generating {quests_to_generate} new quests with updated types...")
+        generated_quests = generate_quests_with_gemini(quests_to_generate)
+        
+        if not generated_quests:
+            return jsonify({'error': 'Failed to generate new quests'}), 500
+        
+        # Step 3: Insert new quests into database
+        inserted_count = 0
+        for quest_data in generated_quests:
+            try:
+                quest_ref = db.collection('Quests').document()
+                quest_data['id'] = quest_ref.id
+                quest_data['created_at'] = datetime.utcnow()
+                quest_data['updated_at'] = datetime.utcnow()
+                quest_ref.set(quest_data)
+                inserted_count += 1
+                print(f"✅ Inserted quest: {quest_data['title']} (Type: {quest_data['type']})")
+            except Exception as e:
+                print(f"❌ Error inserting quest: {e}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully reset quests! Deleted {deleted_count} old quests and generated {inserted_count} new quests.',
+            'deleted_count': deleted_count,
+            'generated_count': inserted_count,
+            'quests': generated_quests[:10]  # Return first 10 for preview
+        })
+        
+    except Exception as e:
+        print(f"❌ Error resetting quests: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 def generate_quests_with_gemini(count=10):
     """Generate quest content using Gemini API"""
     try:
@@ -2061,32 +2125,32 @@ def generate_quests_with_gemini(count=10):
             {
                 'name': 'scanning',
                 'icon': 'camera-alt',
-                'description': 'Camera-based item identification quests',
-                'types': ['scan', 'identify', 'categorize']
+                'description': 'Camera-based material identification and scanning',
+                'types': ['scan_material', 'identify_item', 'categorize_waste', 'discover_material']
             },
             {
                 'name': 'community',
                 'icon': 'people',
-                'description': 'Social sharing and engagement quests',
-                'types': ['share', 'post', 'comment', 'like']
+                'description': 'Social sharing and community engagement',
+                'types': ['share_tip', 'post_project', 'comment_help', 'like_content', 'share_achievement']
             },
             {
                 'name': 'recycling',
                 'icon': 'recycling',
-                'description': 'Physical recycling activities',
-                'types': ['recycle', 'collect', 'sort', 'dispose']
-            },
-            {
-                'name': 'upcycling',
-                'icon': 'build',
-                'description': 'Creative waste transformation',
-                'types': ['transform', 'create', 'craft', 'repurpose']
+                'description': 'Recycling projects and material management',
+                'types': ['start_project', 'complete_project', 'add_material', 'track_progress']
             },
             {
                 'name': 'profile',
                 'icon': 'person',
-                'description': 'Account setup and profile completion',
-                'types': ['complete', 'update', 'verify']
+                'description': 'Profile setup and personalization',
+                'types': ['complete_profile', 'add_photo', 'update_info', 'verify_account']
+            },
+            {
+                'name': 'location',
+                'icon': 'place',
+                'description': 'Location-based environmental awareness',
+                'types': ['share_location', 'climate_awareness', 'local_recycling', 'environmental_tips']
             }
         ]
         
@@ -2172,12 +2236,12 @@ def validate_quest_data(quest_data, category):
         # Ensure points is a valid number
         try:
             quest_data['points'] = int(quest_data['points'])
-            if quest_data['points'] < 25:
-                quest_data['points'] = 25
-            elif quest_data['points'] > 300:
-                quest_data['points'] = 300
+            if quest_data['points'] < 12:
+                quest_data['points'] = 12
+            elif quest_data['points'] > 150:
+                quest_data['points'] = 150
         except (ValueError, TypeError):
-            quest_data['points'] = random.choice([25, 50, 100, 150, 200, 300])
+            quest_data['points'] = random.choice([12, 25, 50, 75, 100, 150])
         
         # Ensure target_count is valid
         try:
@@ -2224,39 +2288,135 @@ def get_default_value(field, category):
 def create_fallback_quest(category, quest_type):
     """Create a fallback quest if Gemini generation fails"""
     fallback_templates = {
-        'scan': {
-            'title': f"Scan {random.choice([5, 10, 15, 20])} {category['name']} Items",
-            'description': f"Use the camera to scan and identify {random.choice([5, 10, 15, 20])} different {category['name']} items.",
-            'points': random.choice([50, 100, 150]),
+        'scan_material': {
+            'title': f"Scan {random.choice([5, 10, 15, 20])} Materials",
+            'description': f"Use the camera to scan and identify {random.choice([5, 10, 15, 20])} different materials for recycling.",
+            'points': random.choice([25, 50, 75]),
             'target_count': random.choice([5, 10, 15, 20])
         },
-        'community': {
-            'title': f"Share {random.choice([3, 5, 7])} Community Posts",
-            'description': f"Post helpful {category['name']} tips or projects in the community.",
-            'points': random.choice([75, 150, 225]),
-            'target_count': random.choice([3, 5, 7])
+        'identify_item': {
+            'title': f"Identify {random.choice([3, 5, 8])} Waste Items",
+            'description': f"Successfully identify and categorize {random.choice([3, 5, 8])} different waste items.",
+            'points': random.choice([37, 62, 87]),
+            'target_count': random.choice([3, 5, 8])
         },
-        'recycle': {
-            'title': f"Recycle {random.choice([10, 20, 30])} {category['name'].title()} Items",
-            'description': f"Collect and properly recycle {random.choice([10, 20, 30])} {category['name']} items.",
-            'points': random.choice([100, 200, 300]),
-            'target_count': random.choice([10, 20, 30])
+        'categorize_waste': {
+            'title': f"Categorize {random.choice([10, 15, 25])} Items",
+            'description': f"Properly categorize {random.choice([10, 15, 25])} waste items by material type.",
+            'points': random.choice([50, 75, 100]),
+            'target_count': random.choice([10, 15, 25])
         },
-        'upcycle': {
-            'title': f"Upcycle {random.choice([2, 3, 5])} {category['name'].title()} Items",
-            'description': f"Transform {random.choice([2, 3, 5])} waste items into useful household items.",
-            'points': random.choice([150, 250, 350]),
+        'discover_material': {
+            'title': f"Discover {random.choice([5, 10])} New Materials",
+            'description': f"Scan and discover {random.choice([5, 10])} new materials you haven't seen before.",
+            'points': random.choice([37, 75]),
+            'target_count': random.choice([5, 10])
+        },
+        'share_tip': {
+            'title': f"Share {random.choice([3, 5])} Recycling Tips",
+            'description': f"Share {random.choice([3, 5])} helpful recycling tips with the community.",
+            'points': random.choice([37, 62]),
+            'target_count': random.choice([3, 5])
+        },
+        'post_project': {
+            'title': f"Post {random.choice([2, 3, 5])} Recycling Projects",
+            'description': f"Share {random.choice([2, 3, 5])} of your recycling projects with the community.",
+            'points': random.choice([50, 75, 100]),
             'target_count': random.choice([2, 3, 5])
         },
-        'profile': {
-            'title': f"Complete Your {category['name'].title()} Profile",
-            'description': f"Fill out your complete {category['name']} profile information.",
+        'comment_help': {
+            'title': f"Help {random.choice([5, 10, 15])} Community Members",
+            'description': f"Leave helpful comments on {random.choice([5, 10, 15])} community posts.",
+            'points': random.choice([25, 50, 75]),
+            'target_count': random.choice([5, 10, 15])
+        },
+        'like_content': {
+            'title': f"Engage with {random.choice([10, 20, 30])} Posts",
+            'description': f"Like and engage with {random.choice([10, 20, 30])} community posts.",
+            'points': random.choice([12, 25, 37]),
+            'target_count': random.choice([10, 20, 30])
+        },
+        'share_achievement': {
+            'title': f"Share {random.choice([2, 3])} Achievements",
+            'description': f"Share {random.choice([2, 3])} of your recycling achievements with the community.",
+            'points': random.choice([37, 62]),
+            'target_count': random.choice([2, 3])
+        },
+        'start_project': {
+            'title': f"Start {random.choice([2, 3, 5])} Recycling Projects",
+            'description': f"Begin {random.choice([2, 3, 5])} new recycling projects in the app.",
+            'points': random.choice([50, 75, 100]),
+            'target_count': random.choice([2, 3, 5])
+        },
+        'complete_project': {
+            'title': f"Complete {random.choice([1, 2, 3])} Recycling Projects",
+            'description': f"Successfully complete {random.choice([1, 2, 3])} recycling projects.",
+            'points': random.choice([75, 125, 175]),
+            'target_count': random.choice([1, 2, 3])
+        },
+        'add_material': {
+            'title': f"Add {random.choice([5, 10, 15])} Materials to Projects",
+            'description': f"Add {random.choice([5, 10, 15])} different materials to your recycling projects.",
+            'points': random.choice([37, 62, 87]),
+            'target_count': random.choice([5, 10, 15])
+        },
+        'track_progress': {
+            'title': f"Track Progress on {random.choice([3, 5, 7])} Projects",
+            'description': f"Update and track progress on {random.choice([3, 5, 7])} active recycling projects.",
+            'points': random.choice([25, 50, 75]),
+            'target_count': random.choice([3, 5, 7])
+        },
+        'complete_profile': {
+            'title': "Complete Your Profile",
+            'description': "Fill out all sections of your user profile including personal information.",
             'points': 50,
             'target_count': 1
+        },
+        'add_photo': {
+            'title': "Add Profile Photo",
+            'description': "Upload a profile photo to personalize your account.",
+            'points': 25,
+            'target_count': 1
+        },
+        'update_info': {
+            'title': f"Update Profile {random.choice([2, 3])} Times",
+            'description': f"Keep your profile information current by updating it {random.choice([2, 3])} times.",
+            'points': random.choice([12, 25]),
+            'target_count': random.choice([2, 3])
+        },
+        'verify_account': {
+            'title': "Verify Your Account",
+            'description': "Complete account verification to unlock all features.",
+            'points': 37,
+            'target_count': 1
+        },
+        'share_location': {
+            'title': "Share Your Location",
+            'description': "Enable location sharing to get personalized environmental tips.",
+            'points': 25,
+            'target_count': 1
+        },
+        'climate_awareness': {
+            'title': f"Check Climate Data {random.choice([5, 10])} Times",
+            'description': f"View your local climate information {random.choice([5, 10])} times to stay informed.",
+            'points': random.choice([12, 25]),
+            'target_count': random.choice([5, 10])
+        },
+        'local_recycling': {
+            'title': f"Discover {random.choice([3, 5])} Local Recycling Options",
+            'description': f"Find and explore {random.choice([3, 5])} local recycling facilities or programs.",
+            'points': random.choice([37, 62]),
+            'target_count': random.choice([3, 5])
+        },
+        'environmental_tips': {
+            'title': f"Read {random.choice([5, 10, 15])} Environmental Tips",
+            'description': f"Read and learn from {random.choice([5, 10, 15])} environmental tips and articles.",
+            'points': random.choice([12, 25, 37]),
+            'target_count': random.choice([5, 10, 15])
         }
     }
     
-    template = fallback_templates.get(quest_type, fallback_templates['scan'])
+    template = fallback_templates.get(quest_type, fallback_templates['scan_material'])
     
     return {
         'title': template['title'],
@@ -2296,6 +2456,34 @@ def get_quests():
         
     except Exception as e:
         print(f"Error fetching quests: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/quests/delete-all', methods=['DELETE'])
+def delete_all_quests():
+    """Delete all existing quests from the database"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get all quests (active and inactive)
+        quests_ref = db.collection('Quests').stream()
+        deleted_count = 0
+        
+        for quest_doc in quests_ref:
+            quest_doc.reference.delete()
+            deleted_count += 1
+        
+        print(f"Deleted {deleted_count} quests from database")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully deleted {deleted_count} quests',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        print(f"Error deleting quests: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -2523,21 +2711,21 @@ def get_user_quest_stats(user_id):
         total_points = sum(p.get('points_earned', 0) for p in completed_quests)
         total_quests = len(progress_data)
         
-        # Get level based on points
-        if total_points < 100:
+        # Get level based on points (reduced by half)
+        if total_points < 50:
             level = 'Eco Beginner'
-        elif total_points < 300:
+        elif total_points < 150:
             level = 'Eco Explorer'
-        elif total_points < 600:
+        elif total_points < 300:
             level = 'Eco Warrior'
-        elif total_points < 1000:
+        elif total_points < 500:
             level = 'Eco Champion'
-        elif total_points < 1500:
+        elif total_points < 750:
             level = 'Eco Master'
         else:
             level = 'Eco Legend'
         
-        level_progress = (total_points % 500) / 500 * 100
+        level_progress = (total_points % 250) / 250 * 100
         
         return jsonify({
             'success': True,
@@ -3219,6 +3407,299 @@ def generate_tropical_fallback_steps(material_name):
         base_steps.insert(6, f"5b. Remove batteries before disposal to prevent corrosion")
     
     return base_steps
+
+# Educational Content Functions
+
+def query_educational_content(material_name, db):
+    """Query educational content from the Educational table for a specific material"""
+    try:
+        print(f"[Educational Content] Querying database for material: '{material_name}'")
+        
+        if not db:
+            print("[Educational Content] ❌ Database not available")
+            return None
+            
+        # Query the Educational collection for content about this material
+        educational_docs = db.collection('Educational').where('material_name', '==', material_name).limit(1).stream()
+        
+        for doc in educational_docs:
+            data = doc.to_dict()
+            print(f"[Educational Content] ✅ Found educational content for '{material_name}': {data.get('title', 'No title')}")
+            return {
+                'id': doc.id,
+                'material_name': data.get('material_name', ''),
+                'title': data.get('title', ''),
+                'content': data.get('content', ''),
+                'fun_fact': data.get('fun_fact', ''),
+                'recycling_tip': data.get('recycling_tip', ''),
+                'environmental_impact': data.get('environmental_impact', ''),
+                'created_at': data.get('created_at', ''),
+                'updated_at': data.get('updated_at', '')
+            }
+        
+        print(f"[Educational Content] ❌ No educational content found for '{material_name}'")
+        return None
+        
+    except Exception as e:
+        print(f"[Educational Content] ❌ Error querying educational content: {e}")
+        return None
+
+def generate_educational_content_with_gemini(material_name):
+    """Generate educational content about a material using Gemini API"""
+    try:
+        print(f"[Educational Content] Generating content with Gemini for material: '{material_name}'")
+        
+        if not gemini_initialized:
+            print("[Educational Content] ❌ Gemini API not initialized")
+            return None
+        
+        
+        # Create a comprehensive prompt for educational content
+        prompt = f"""
+        Generate educational content about recycling and environmental impact for the material: "{material_name}".
+        
+        Please provide a comprehensive educational piece that includes:
+        1. A catchy title (max 60 characters)
+        2. Main educational content (2-3 paragraphs, informative but engaging)
+        3. A fun fact about the material (1-2 sentences)
+        4. A practical recycling tip (1-2 sentences)
+        5. Environmental impact information (1-2 sentences about benefits of recycling this material)
+        
+        IMPORTANT: Return ONLY a valid JSON object with these exact keys (no markdown, no code blocks, no extra text):
+        - title: string
+        - content: string
+        - fun_fact: string
+        - recycling_tip: string
+        - environmental_impact: string
+        
+        Make the content engaging, educational, and encouraging for users to recycle. Use a friendly, informative tone.
+        """
+        
+        # Generate content using existing Gemini API structure
+        print(f"[Educational Content] 🔍 Calling Gemini API with prompt: {prompt[:200]}...")
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[prompt]
+        )
+        
+        print(f"[Educational Content] 🔍 Raw Gemini response: {response}")
+        print(f"[Educational Content] 🔍 Response text: {response.text if response else 'No response'}")
+        
+        if response and response.text:
+            # Parse the JSON response
+            import json
+            import re
+            try:
+                raw_text = response.text.strip()
+                print(f"[Educational Content] 🔍 Raw response text: {raw_text}")
+                
+                # Try to extract JSON from markdown code blocks
+                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
+                if json_match:
+                    json_text = json_match.group(1)
+                    print(f"[Educational Content] 🔍 Extracted JSON from code block: {json_text}")
+                else:
+                    # Try to find JSON object directly
+                    json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                    if json_match:
+                        json_text = json_match.group(0)
+                        print(f"[Educational Content] 🔍 Found JSON object: {json_text}")
+                    else:
+                        json_text = raw_text
+                        print(f"[Educational Content] 🔍 Using raw text as JSON: {json_text}")
+                
+                content_data = json.loads(json_text)
+                
+                # Validate required fields
+                required_fields = ['title', 'content', 'fun_fact', 'recycling_tip', 'environmental_impact']
+                for field in required_fields:
+                    if field not in content_data:
+                        content_data[field] = f"Information about {material_name} recycling"
+                
+                print(f"[Educational Content] ✅ Generated content for '{material_name}': {content_data.get('title', 'No title')}")
+                print(f"[Educational Content] 📊 Full content data: {content_data}")
+                return content_data
+                
+            except json.JSONDecodeError as e:
+                print(f"[Educational Content] ❌ Failed to parse Gemini response as JSON: {e}")
+                print(f"[Educational Content] Raw response: {response.text}")
+                return None
+        else:
+            print("[Educational Content] ❌ No response from Gemini API")
+            return None
+            
+    except Exception as e:
+        print(f"[Educational Content] ❌ Error generating content with Gemini: {e}")
+        return None
+
+def save_educational_content_to_db(material_name, content_data, db):
+    """Save generated educational content to the Educational table"""
+    try:
+        print(f"[Educational Content] Saving content to database for material: '{material_name}'")
+        
+        if not db:
+            print("[Educational Content] ❌ Database not available")
+            return None
+            
+        # Prepare data for database
+        educational_data = {
+            'material_name': material_name,
+            'title': content_data.get('title', ''),
+            'content': content_data.get('content', ''),
+            'fun_fact': content_data.get('fun_fact', ''),
+            'recycling_tip': content_data.get('recycling_tip', ''),
+            'environmental_impact': content_data.get('environmental_impact', ''),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        # Save to Educational collection
+        doc_ref = db.collection('Educational').add(educational_data)
+        doc_id = doc_ref[1].id
+        
+        print(f"[Educational Content] ✅ Saved educational content to database with ID: {doc_id}")
+        return {
+            'id': doc_id,
+            **educational_data
+        }
+        
+    except Exception as e:
+        print(f"[Educational Content] ❌ Error saving content to database: {e}")
+        return None
+
+@app.route('/educational-content/<material_name>', methods=['GET'])
+def get_educational_content(material_name):
+    """Get or generate educational content for a material"""
+    try:
+        print(f"[Educational Content API] Request for material: '{material_name}'")
+        
+        # First, try to get existing content from database
+        existing_content = query_educational_content(material_name, db)
+        
+        if existing_content:
+            print(f"[Educational Content API] ✅ Returning existing content for '{material_name}'")
+            return jsonify({
+                'success': True,
+                'content': existing_content,
+                'source': 'database'
+            })
+        
+        # If no existing content, generate new content
+        print(f"[Educational Content API] No existing content found, generating new content for '{material_name}'")
+        generated_content = generate_educational_content_with_gemini(material_name)
+        
+        if generated_content:
+            # Save the generated content to database
+            saved_content = save_educational_content_to_db(material_name, generated_content, db)
+            
+            if saved_content:
+                print(f"[Educational Content API] ✅ Generated and saved new content for '{material_name}'")
+                return jsonify({
+                    'success': True,
+                    'content': saved_content,
+                    'source': 'generated'
+                })
+            else:
+                print(f"[Educational Content API] ❌ Failed to save generated content for '{material_name}'")
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to save generated content'
+                }), 500
+        else:
+            print(f"[Educational Content API] ❌ Failed to generate content for '{material_name}'")
+            return jsonify({
+                'success': False,
+                'error': 'Failed to generate educational content'
+            }), 500
+            
+    except Exception as e:
+        print(f"[Educational Content API] ❌ Error in get_educational_content: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/upload-project-photo', methods=['POST'])
+def upload_project_photo():
+    """Upload a photo for a completed project"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+        
+        project_id = data.get('project_id')
+        user_id = data.get('user_id')
+        image_data = data.get('image_data')  # Base64 encoded image
+        
+        if not all([project_id, user_id, image_data]):
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+        
+        print(f"[Project Photo] Uploading photo for project: {project_id}, user: {user_id}")
+        
+        # Decode base64 image
+        try:
+            # Remove data URL prefix if present
+            if image_data.startswith('data:image'):
+                image_data = image_data.split(',')[1]
+            
+            image_bytes = base64.b64decode(image_data)
+            image = Image.open(io.BytesIO(image_bytes))
+            
+            # Generate unique filename
+            filename = f"project_{project_id}_{uuid.uuid4().hex[:8]}.jpg"
+            
+            # Upload to Hostinger (you'll need to configure your Hostinger FTP details)
+            # For now, we'll save locally and return a URL
+            upload_path = f"uploads/project_photos/{filename}"
+            os.makedirs(os.path.dirname(upload_path), exist_ok=True)
+            
+            # Convert to RGB and save as JPEG
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image.save(upload_path, 'JPEG', quality=85)
+            
+            # In production, upload to Hostinger here
+            # For now, return local path
+            photo_url = f"http://127.0.0.1:5000/{upload_path}"
+            
+            # Update project in database with photo URL
+            if db:
+                project_ref = db.collection('projects').document(project_id)
+                project_ref.update({
+                    'photo_url': photo_url,
+                    'photo_uploaded_at': datetime.now().isoformat()
+                })
+                
+                print(f"[Project Photo] ✅ Photo uploaded successfully: {photo_url}")
+                
+                return jsonify({
+                    'success': True,
+                    'photo_url': photo_url,
+                    'message': 'Photo uploaded successfully'
+                })
+            else:
+                return jsonify({'success': False, 'error': 'Database not available'}), 500
+                
+        except Exception as e:
+            print(f"[Project Photo] ❌ Error processing image: {e}")
+            return jsonify({'success': False, 'error': 'Invalid image data'}), 400
+            
+    except Exception as e:
+        print(f"[Project Photo] ❌ Error in upload_project_photo: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/uploads/project_photos/<filename>')
+def serve_project_photo(filename):
+    """Serve uploaded project photos"""
+    try:
+        photo_path = f"uploads/project_photos/{filename}"
+        if os.path.exists(photo_path):
+            return send_file(photo_path, mimetype='image/jpeg')
+        else:
+            return jsonify({'error': 'Photo not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Listen on all interfaces so the mobile device / emulator can reach it.

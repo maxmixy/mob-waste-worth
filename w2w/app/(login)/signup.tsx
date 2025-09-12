@@ -1,36 +1,22 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, TouchableOpacity, TextInput, Text } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { saveUserId, updateEULAAcceptance } from '@/lib/user';
 import EULA from '@/components/EULA';
-
-// 🔥 Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyCxj-RNwupirseU_-mGR7LtsLGA86P_GVM",
-  authDomain: "waste-to-worth-7d5b0.firebaseapp.com",
-  projectId: "waste-to-worth-7d5b0",
-  storageBucket: "waste-to-worth-7d5b0.firebasestorage.app",
-  messagingSenderId: "648267234726",
-  appId: "1:648267234726:web:3e70721145557b2f316367",
-  measurementId: "G-E8563BL8PJ"
-};
-
-// ✅ only initialize Firebase once
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
-const db = getFirestore(app);
+import { useAuth } from '@/contexts/AuthContext';
+import { auth, db } from '@/lib/firebase';
 
 export default function SignUpPage() {
   const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
 
   const [loading, setLoading] = useState(false);
 
@@ -43,6 +29,14 @@ export default function SignUpPage() {
   const [confirmError, setConfirmError] = useState('');
   const [showEULA, setShowEULA] = useState(false);
   const [pendingUserData, setPendingUserData] = useState<{email: string, password: string} | null>(null);
+
+  // Redirect authenticated users to main app
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      console.log('[SignUp] ✅ User already authenticated, redirecting to main app');
+      router.replace('/(tabs)/' as any);
+    }
+  }, [isAuthenticated, isLoading, router]);
 
   const handleSignUp = async () => {
     setLoading(true);
@@ -102,7 +96,7 @@ export default function SignUpPage() {
           console.warn('⚠️ Failed to create user document:', e);
         }
 
-        router.replace('(tabs)');
+        router.replace('/(tabs)/' as any);
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -130,6 +124,24 @@ export default function SignUpPage() {
     return (
       <ThemedView style={{ flex: 1, backgroundColor: Colors[colorScheme].background }}>
         <EULA onAccept={handleEULAAccept} onDecline={handleEULADecline} />
+      </ThemedView>
+    );
+  }
+
+  // Show loading while checking authentication
+  if (isLoading) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Checking authentication...</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  // Don't render signup form if user is already authenticated (redirect will happen)
+  if (isAuthenticated) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Redirecting to main app...</ThemedText>
       </ThemedView>
     );
   }

@@ -3,8 +3,9 @@ import { StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native'
 import { useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { AuthGuard } from '@/components/AuthGuard';
 
-export default function AboutScreen() {
+function AboutScreen() {
     const router = useRouter();
 
     const handleContactPress = () => {
@@ -299,3 +300,11 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
 });
+
+export default function AboutScreenWithAuth() {
+    return (
+        <AuthGuard>
+            <AboutScreen />
+        </AuthGuard>
+    );
+}

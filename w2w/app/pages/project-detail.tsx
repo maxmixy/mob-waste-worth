@@ -4,6 +4,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { getUserId } from '@/lib/user';
+import { AuthGuard } from '@/components/AuthGuard';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
+import ProjectPhotoModal from '@/components/ProjectPhotoModal';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -15,6 +19,19 @@ interface RecyclingProject {
     project_name: string;
     required_traits: string[];
     steps: string[];
+    difficulty?: string;
+    estimated_time?: string;
+    tools_needed?: string[];
+    description?: string;
+    environmental_impact?: string;
+    user_id?: string;
+    progress?: number;
+    is_completed?: boolean;
+    is_current?: boolean;
+    created_at?: string;
+    updated_at?: string;
+    photo_url?: string;
+    photo_uploaded_at?: string;
 }
 
 interface ProjectProgress {
@@ -26,9 +43,10 @@ interface ProjectProgress {
     isCompleted: boolean;
 }
 
-export default function ProjectDetailScreen() {
+function ProjectDetailScreen() {
     const params = useLocalSearchParams();
     const router = useRouter();
+    const { userId } = useAuth();
     const [project, setProject] = useState<RecyclingProject | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -37,6 +55,20 @@ export default function ProjectDetailScreen() {
     const [progress, setProgress] = useState<ProjectProgress | null>(null);
     const [updatingProgress, setUpdatingProgress] = useState(false);
     const [showCompletionCelebration, setShowCompletionCelebration] = useState(false);
+    const [showPhotoModal, setShowPhotoModal] = useState(false);
+
+    // Handle photo upload completion
+    const handlePhotoUploaded = (photoUrl: string) => {
+        console.log('📸 Photo uploaded successfully:', photoUrl);
+        // Update the project with the new photo URL
+        if (project) {
+            setProject({
+                ...project,
+                photo_url: photoUrl,
+                photo_uploaded_at: new Date().toISOString()
+            });
+        }
+    };
 
     // Fetch project details from backend
     const fetchProjectDetails = async (projectId: string) => {
@@ -133,6 +165,23 @@ export default function ProjectDetailScreen() {
                 if (updatedProgress.isCompleted && !progress?.isCompleted) {
                     console.log('🎉 Project completed! Showing celebration...');
                     setShowCompletionCelebration(true);
+                    
+                    // Track quest progress for recycling project completion
+                    console.log('♻️ Tracking recycling project action: Complete project');
+                    try {
+                        if (userId) {
+                            const results = await questService.trackRecyclingProjectAction(userId);
+                            await questService.checkCompletedQuests(results);
+                            console.log('✅ Recycling quest progress updated:', results);
+                        }
+                    } catch (questError) {
+                        console.error('❌ Error tracking recycling quest:', questError);
+                    }
+                    
+                    // Show photo submission modal after a short delay
+                    setTimeout(() => {
+                        setShowPhotoModal(true);
+                    }, 2000);
                 }
             } else {
                 console.error('Failed to update progress');
@@ -201,6 +250,19 @@ export default function ProjectDetailScreen() {
             if (response.ok) {
                 console.log('Successfully set project as current project');
                 setIsCurrentProject(true);
+                
+                // Track quest progress for recycling project action
+                console.log('♻️ Tracking recycling project action: Start project');
+                try {
+                    if (userId) {
+                        const results = await questService.trackRecyclingProjectAction(userId);
+                        await questService.checkCompletedQuests(results);
+                        console.log('✅ Recycling quest progress updated:', results);
+                    }
+                } catch (questError) {
+                    console.error('❌ Error tracking recycling quest:', questError);
+                }
+                
                 Alert.alert(
                     'Success', 
                     'Project set as your current project!',
@@ -318,6 +380,27 @@ export default function ProjectDetailScreen() {
                 <ThemedText style={styles.materialName}>
                     Material: {project.material_name}
                 </ThemedText>
+                
+                {/* Project Photo Section */}
+                {project.photo_url && (
+                    <ThemedView style={styles.projectPhotoSection}>
+                        <ThemedText type="subtitle" style={styles.projectPhotoTitle}>
+                            📸 Your Completed Project
+                        </ThemedText>
+                        <ThemedView style={styles.projectPhotoContainer}>
+                            <Image 
+                                source={{ uri: project.photo_url }} 
+                                style={styles.projectPhoto}
+                                resizeMode="cover"
+                            />
+                        </ThemedView>
+                        {project.photo_uploaded_at && (
+                            <ThemedText style={styles.photoUploadDate}>
+                                Uploaded: {new Date(project.photo_uploaded_at).toLocaleDateString()}
+                            </ThemedText>
+                        )}
+                    </ThemedView>
+                )}
             </ThemedView>
 
             {/* Required Traits Section */}
@@ -533,6 +616,15 @@ export default function ProjectDetailScreen() {
                 </ThemedView>
             </ThemedView>
         )}
+            {/* Project Photo Submission Modal */}
+            <ProjectPhotoModal
+                visible={showPhotoModal}
+                onClose={() => setShowPhotoModal(false)}
+                onPhotoUploaded={handlePhotoUploaded}
+                projectId={project?.id || ''}
+                userId={userId || ''}
+                projectName={project?.project_name || ''}
+            />
         </>
     );
 }
@@ -930,4 +1022,44 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
     },
+    projectPhotoSection: {
+        marginTop: 20,
+        padding: 16,
+        backgroundColor: 'rgba(0, 122, 255, 0.1)',
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#007AFF',
+        borderStyle: 'dashed',
+    },
+    projectPhotoTitle: {
+        textAlign: 'center',
+        marginBottom: 12,
+        color: '#007AFF',
+        fontWeight: '600',
+    },
+    projectPhotoContainer: {
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    projectPhoto: {
+        width: 200,
+        height: 150,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#007AFF',
+    },
+    photoUploadDate: {
+        textAlign: 'center',
+        fontSize: 12,
+        opacity: 0.7,
+        fontStyle: 'italic',
+    },
 });
+
+export default function ProjectDetailScreenWithAuth() {
+    return (
+        <AuthGuard>
+            <ProjectDetailScreen />
+        </AuthGuard>
+    );
+}

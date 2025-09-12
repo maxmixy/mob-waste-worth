@@ -5,7 +5,6 @@ import { useState, useEffect } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { ScrollView as RNScrollView } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -16,8 +15,9 @@ import { ImageService } from '@/lib/imageService';
 import SettingsSidebar from '@/components/SettingsSidebar';
 import { useLocation, LocationData } from '@/hooks/useLocation';
 import { useClimate } from '@/hooks/useClimate';
-import { ClimateData } from '@/lib/climateService';
 import { populateTropicalDisposalTable, getUniqueMaterialsCount, getTropicalDisposalCount } from '@/lib/adminService';
+import { useAuth } from '@/contexts/AuthContext';
+import { questService } from '@/lib/questService';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -60,6 +60,7 @@ interface CurrentProjectData {
 export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const params = useLocalSearchParams();
+  const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [userMaterials, setUserMaterials] = useState<MaterialData[]>([]);
   const [userProjects, setUserProjects] = useState<ProjectData[]>([]);
@@ -72,11 +73,11 @@ export default function HomeScreen() {
   const [userName, setUserName] = useState<string>('User');
   const [adminTapCount, setAdminTapCount] = useState(0);
   
-  // Location functionality
-  const { location, error: locationError, loading: locationLoading, requestLocation } = useLocation();
+  // Location functionality (for automatic background location detection)
+  const { location, requestLocation } = useLocation();
   
-  // Climate functionality
-  const { climateData, loading: climateLoading, error: climateError, getClimateForLocation } = useClimate();
+  // Climate functionality (for automatic climate data fetching)
+  const { getClimateForLocation } = useClimate();
 
   // Fetch user's scanned materials
   const fetchUserMaterials = async (userId: string) => {
@@ -147,7 +148,6 @@ export default function HomeScreen() {
   // Send location data to backend (for future use)
   const sendLocationToBackend = async (locationData: LocationData) => {
     try {
-      const userId = await getUserId();
       if (!userId) return;
 
       const response = await fetch(`${API_BASE_URL}/user/${userId}/location`, {
@@ -173,14 +173,32 @@ export default function HomeScreen() {
     }
   };
 
-  // Handle location update
-  const handleLocationUpdate = async () => {
-    await requestLocation();
-    if (location) {
-      // Send to backend for future location-based features
-      await sendLocationToBackend(location);
-      // Get climate data for the location
-      await getClimateForLocation(location);
+  // Handle automatic location update on login
+  const handleAutomaticLocationUpdate = async () => {
+    try {
+      console.log('🌍 Automatically requesting location on login...');
+      await requestLocation();
+      if (location) {
+        console.log('🌍 Location obtained, sending to backend and getting climate data...');
+        // Send to backend for future location-based features
+        await sendLocationToBackend(location);
+        // Get climate data for the location
+        await getClimateForLocation(location);
+        
+        // Track quest progress for location action
+        console.log('📍 Tracking location action: Share location');
+        try {
+          if (userId) {
+            const results = await questService.trackLocationAction(userId);
+            await questService.checkCompletedQuests(results);
+            console.log('✅ Location quest progress updated:', results);
+          }
+        } catch (questError) {
+          console.error('❌ Error tracking location quest:', questError);
+        }
+      }
+    } catch (error) {
+      console.error('🌍 Error getting location automatically:', error);
     }
   };
 
@@ -274,6 +292,16 @@ export default function HomeScreen() {
       setUserData(defaultProfile);
       setUserName(defaultProfile.name);
       
+      // Track quest progress for profile completion
+      console.log('👤 Tracking profile action: Initialize profile');
+      try {
+        const results = await questService.trackProfileCompletion(userId);
+        await questService.checkCompletedQuests(results);
+        console.log('✅ Profile quest progress updated:', results);
+      } catch (questError) {
+        console.error('❌ Error tracking profile quest:', questError);
+      }
+      
       return defaultProfile;
     } catch (error) {
       console.error('🔧 Error initializing user profile:', error);
@@ -284,7 +312,6 @@ export default function HomeScreen() {
   // Refresh user profile data (name, title, progress)
   const refreshUserProfile = async () => {
     try {
-      const userId = await getUserId();
       if (userId) {
         console.log('🔄 Refreshing user profile data...');
         const [userDataResponse, profileInfo] = await Promise.all([
@@ -412,7 +439,6 @@ export default function HomeScreen() {
     const loadUserData = async () => {
       try {
         setLoading(true);
-        const userId = await getUserId();
         
         if (!userId) {
           setError('No user ID found');
@@ -483,6 +509,9 @@ export default function HomeScreen() {
         // Load profile image
         await loadProfileImage(userId);
         
+        // Automatically request location when user logs in
+        await handleAutomaticLocationUpdate();
+        
         if (userMaterialsData.length > 0) {
           // Fetch details for each material
           const materialDetails = await Promise.all(
@@ -510,18 +539,17 @@ export default function HomeScreen() {
       }
     };
 
-    loadUserData();
-  }, []);
+    if (userId) {
+      loadUserData();
+    }
+  }, [userId]);
 
   // Handle refresh parameter
   useEffect(() => {
     const handleRefresh = async () => {
-      if (params.refresh === 'true') {
+      if (params.refresh === 'true' && userId) {
         try {
-          const userId = await getUserId();
-          if (userId) {
-            await refreshCurrentProject(userId);
-          }
+          await refreshCurrentProject(userId);
         } catch (error) {
           console.error('Error handling refresh:', error);
         }
@@ -529,7 +557,7 @@ export default function HomeScreen() {
     };
 
     handleRefresh();
-  }, [params.refresh]);
+  }, [params.refresh, userId]);
 
   if (loading) {
     return (
@@ -673,177 +701,6 @@ export default function HomeScreen() {
               )}
             </View>
           </ThemedView>
-          {/* Divider Line */}
-          <View style={styles.divider} />
-          
-          {/* Location Section */}
-          <ThemedView
-            style={[styles.section, { flex: 1 }]}
-            lightColor={Colors.light.background}
-            darkColor={Colors.dark.background}
-          >
-            <View style={styles.locationHeader}>
-              <ThemedText type="subtitle">Your Location</ThemedText>
-              <TouchableOpacity
-                style={[
-                  styles.locationButton,
-                  { backgroundColor: Colors[colorScheme].tint }
-                ]}
-                onPress={handleLocationUpdate}
-                disabled={locationLoading}
-              >
-                <MaterialIcons 
-                  name="my-location" 
-                  size={16} 
-                  color="white" 
-                />
-                <ThemedText style={styles.locationButtonText}>
-                  {locationLoading ? 'Getting...' : 'Get Location'}
-                </ThemedText>
-              </TouchableOpacity>
-            </View>
-            
-            <RNScrollView 
-              style={styles.locationScrollContainer}
-              showsVerticalScrollIndicator={true}
-              nestedScrollEnabled={true}
-            >
-              {locationError && (
-                <View style={styles.locationErrorContainer}>
-                  <ThemedText style={styles.locationErrorText}>
-                    {locationError.message}
-                  </ThemedText>
-                </View>
-              )}
-              
-              {location && (
-                <View style={styles.locationInfoContainer}>
-                  <View style={styles.locationInfo}>
-                    <MaterialIcons name="place" size={20} color={Colors[colorScheme].tint} />
-                    <View style={styles.locationDetails}>
-                      <ThemedText style={styles.locationCoordinates}>
-                        {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
-                      </ThemedText>
-                      {location.accuracy && (
-                        <ThemedText style={styles.locationAccuracy}>
-                          Accuracy: {location.accuracy.toFixed(0)}m
-                        </ThemedText>
-                      )}
-                    </View>
-                  </View>
-                  
-                  {/* Climate Information */}
-                  {climateLoading && (
-                    <View style={styles.climateLoadingContainer}>
-                      <ActivityIndicator size="small" color={Colors[colorScheme].tint} />
-                      <ThemedText style={styles.climateLoadingText}>Getting climate data...</ThemedText>
-                    </View>
-                  )}
-                  
-                  {climateError && (
-                    <View style={styles.climateErrorContainer}>
-                      <ThemedText style={styles.climateErrorText}>
-                        Climate data unavailable: {climateError}
-                      </ThemedText>
-                    </View>
-                  )}
-                  
-                  {climateData && (
-                    <View style={styles.climateInfoContainer}>
-                      <View style={styles.climateHeader}>
-                        <MaterialIcons name="wb-sunny" size={16} color="#FF9800" />
-                        <ThemedText style={styles.climateZoneText}>
-                          {climateData.climateZone} Climate
-                        </ThemedText>
-                      </View>
-                      
-                      <View style={styles.climateDetails}>
-                        <View style={styles.climateDetailRow}>
-                          <MaterialIcons name="thermostat" size={14} color="#666" />
-                          <ThemedText style={styles.climateDetailText}>
-                            {climateData.temperature.average}°{climateData.temperature.unit}
-                          </ThemedText>
-                        </View>
-                        <View style={styles.climateDetailRow}>
-                          <MaterialIcons name="opacity" size={14} color="#666" />
-                          <ThemedText style={styles.climateDetailText}>
-                            {climateData.humidity}% humidity
-                          </ThemedText>
-                        </View>
-                      </View>
-                      
-                      <View style={styles.recyclingGuidelinesContainer}>
-                        <ThemedText style={styles.recyclingGuidelinesTitle}>
-                          Recycling Guidelines:
-                        </ThemedText>
-                        <View style={styles.recyclingGuidelinesList}>
-                          <View style={styles.recyclingGuidelineItem}>
-                            <MaterialIcons 
-                              name={climateData.recyclingGuidelines.composting ? "check-circle" : "cancel"} 
-                              size={14} 
-                              color={climateData.recyclingGuidelines.composting ? "#4CAF50" : "#F44336"} 
-                            />
-                            <ThemedText style={styles.recyclingGuidelineText}>
-                              Composting: {climateData.recyclingGuidelines.composting ? "Available" : "Limited"}
-                            </ThemedText>
-                          </View>
-                          <View style={styles.recyclingGuidelineItem}>
-                            <MaterialIcons name="recycling" size={14} color="#2196F3" />
-                            <ThemedText style={styles.recyclingGuidelineText}>
-                              Plastics: {climateData.recyclingGuidelines.plasticRecycling.join(", ")}
-                            </ThemedText>
-                          </View>
-                        </View>
-                        
-                        <TouchableOpacity
-                          style={[
-                            styles.disposalTipsButton,
-                            { backgroundColor: Colors[colorScheme].tint }
-                          ]}
-                          onPress={() => {
-                            // Show disposal tips in an alert for now
-                            const tips = climateData.disposalTips.join('\n• ');
-                            Alert.alert(
-                              `${climateData.climateZone} Climate Disposal Tips`,
-                              `• ${tips}`,
-                              [{ text: 'OK' }]
-                            );
-                          }}
-                        >
-                          <MaterialIcons name="info" size={14} color="white" />
-                          <ThemedText style={styles.disposalTipsButtonText}>
-                            View Disposal Tips
-                          </ThemedText>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
-                  
-                  <ThemedText style={styles.locationHint}>
-                    Location data can be used for nearby recycling centers and local projects
-                  </ThemedText>
-                </View>
-              )}
-              
-              {!location && !locationError && (
-                <View style={styles.locationEmptyState}>
-                  <MaterialIcons name="location-off" size={32} color="#ccc" />
-                  <ThemedText style={styles.locationEmptyText}>
-                    No location data available
-                  </ThemedText>
-                  <ThemedText style={styles.locationEmptySubtext}>
-                    Tap "Get Location" to enable location-based features
-                  </ThemedText>
-                  <ThemedText style={styles.locationWebHint}>
-                    On web: Your browser will ask for location permission
-                  </ThemedText>
-                </View>
-              )}
-            </RNScrollView>
-          </ThemedView>
-          
-          {/* Divider Line */}
-          <View style={styles.divider} />
           {/* Profile Section (Bottom) */}
           <ThemedView
             style={[styles.section, { flex: 1, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }]}
@@ -857,7 +714,6 @@ export default function HomeScreen() {
                   <Pressable
                     style={styles.initializeButton}
                     onPress={async () => {
-                      const userId = await getUserId();
                       if (userId) {
                         await initializeUserProfile(userId);
                         await refreshUserProfile();
@@ -878,7 +734,6 @@ export default function HomeScreen() {
                 <Pressable 
                   style={styles.profileImageContainer}
                   onPress={async () => {
-                    const userId = await getUserId();
                     if (userId) {
                       await loadProfileImage(userId);
                     }
@@ -1285,189 +1140,5 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     marginTop: 8,
     fontWeight: '500',
-  },
-  // Location section styles
-  locationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  locationScrollContainer: {
-    flex: 1,
-    maxHeight: 400,
-  },
-  locationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    gap: 6,
-  },
-  locationButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  locationErrorContainer: {
-    backgroundColor: '#ffebee',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  locationErrorText: {
-    color: '#c62828',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  locationInfoContainer: {
-    backgroundColor: '#f0f8ff',
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e3f2fd',
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  locationDetails: {
-    marginLeft: 8,
-    flex: 1,
-  },
-  locationCoordinates: {
-    fontSize: 14,
-    fontFamily: 'monospace',
-    color: '#1976d2',
-    fontWeight: '600',
-  },
-  locationAccuracy: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  locationHint: {
-    fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  locationEmptyState: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  locationEmptyText: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  locationEmptySubtext: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-  },
-  locationWebHint: {
-    fontSize: 12,
-    color: '#007AFF',
-    textAlign: 'center',
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
-  // Climate information styles
-  climateLoadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    marginTop: 8,
-  },
-  climateLoadingText: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 8,
-  },
-  climateErrorContainer: {
-    backgroundColor: '#ffebee',
-    padding: 8,
-    borderRadius: 6,
-    marginTop: 8,
-  },
-  climateErrorText: {
-    color: '#c62828',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  climateInfoContainer: {
-    backgroundColor: '#f8f9fa',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  climateHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  climateZoneText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginLeft: 6,
-  },
-  climateDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  climateDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  climateDetailText: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 4,
-  },
-  recyclingGuidelinesContainer: {
-    marginTop: 8,
-  },
-  recyclingGuidelinesTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 6,
-  },
-  recyclingGuidelinesList: {
-    gap: 4,
-  },
-  recyclingGuidelineItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  recyclingGuidelineText: {
-    fontSize: 11,
-    color: '#666',
-    marginLeft: 6,
-    flex: 1,
-  },
-  disposalTipsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    marginTop: 8,
-    gap: 6,
-  },
-  disposalTipsButtonText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
   },
 });

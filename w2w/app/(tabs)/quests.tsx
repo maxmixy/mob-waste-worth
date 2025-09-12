@@ -10,6 +10,8 @@ import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import SettingsSidebar from '@/components/SettingsSidebar';
+import { useAuth } from '@/contexts/AuthContext';
+import { questService } from '@/lib/questService';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -38,6 +40,7 @@ interface UserStats {
 
 export default function QuestsScreen() {
   const colorScheme = useColorScheme() ?? 'light';
+  const { userId } = useAuth(); // Get userId from auth context
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -161,13 +164,14 @@ export default function QuestsScreen() {
   ];
 
   useEffect(() => {
-    loadUserData();
-  }, []);
+    if (userId) {
+      loadUserData();
+    }
+  }, [userId]);
 
   const loadUserData = async () => {
     try {
       setLoading(true);
-      const userId = await getUserId();
       
       if (userId) {
         // Load user profile
@@ -215,11 +219,11 @@ export default function QuestsScreen() {
   };
 
   const getLevelFromPoints = (points: number): string => {
-    if (points < 100) return 'Eco Beginner';
-    if (points < 300) return 'Eco Explorer';
-    if (points < 600) return 'Eco Warrior';
-    if (points < 1000) return 'Eco Champion';
-    if (points < 1500) return 'Eco Master';
+    if (points < 50) return 'Eco Beginner';
+    if (points < 150) return 'Eco Explorer';
+    if (points < 300) return 'Eco Warrior';
+    if (points < 500) return 'Eco Champion';
+    if (points < 750) return 'Eco Master';
     return 'Eco Legend';
   };
 
@@ -236,16 +240,59 @@ export default function QuestsScreen() {
         quest.title,
         `${quest.description}\n\nProgress: ${quest.current_progress}/${quest.target_count}\nReward: ${quest.points} points\nDifficulty: ${quest.difficulty_level}`,
         [
-          { text: 'OK', style: 'default' }
+          { text: 'OK', style: 'default' },
+          { 
+            text: 'Update Progress', 
+            style: 'default',
+            onPress: () => updateQuestProgress(quest.id, 1)
+          }
         ]
       );
     }
   };
 
   const refreshProfileImage = async () => {
-    const userId = await getUserId();
     if (userId) {
       await loadProfileImage(userId);
+    }
+  };
+
+  // Update quest progress for a specific quest
+  const updateQuestProgress = async (questId: string, increment: number = 1) => {
+    if (!userId) return;
+
+    try {
+      const result = await questService.updateQuestProgress(questId, increment, userId);
+      
+      if (result.success) {
+        // Refresh the quest data to show updated progress
+        await loadUserData();
+        
+        if (result.isCompleted) {
+          Alert.alert(
+            'Quest Completed! 🎉',
+            `Congratulations! You've completed a quest and earned ${result.pointsEarned} points!`,
+            [{ text: 'Awesome!', style: 'default' }]
+          );
+        }
+        
+        return result;
+      } else {
+        console.error('Failed to update quest progress:', result.error);
+        Alert.alert('Error', result.error || 'Failed to update quest progress');
+        return null;
+      }
+    } catch (error) {
+      console.error('Error updating quest progress:', error);
+      Alert.alert('Error', 'Failed to update quest progress');
+      return null;
+    }
+  };
+
+  // Refresh all quest data
+  const refreshQuests = async () => {
+    if (userId) {
+      await loadUserData();
     }
   };
 
@@ -273,13 +320,22 @@ export default function QuestsScreen() {
           <ThemedView style={styles.titleContainer}>
             <ThemedText type="title">Quests</ThemedText>
           </ThemedView>
-          <Pressable
-            style={styles.settingsButton}
-            onPress={() => setSidebarVisible(true)}
-            accessibilityLabel="Settings"
-          >
-            <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.refreshButton}
+              onPress={refreshQuests}
+              accessibilityLabel="Refresh Quests"
+            >
+              <MaterialIcons name="refresh" size={24} color={Colors[colorScheme].icon} />
+            </Pressable>
+            <Pressable
+              style={styles.settingsButton}
+              onPress={() => setSidebarVisible(true)}
+              accessibilityLabel="Settings"
+            >
+              <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
+            </Pressable>
+          </View>
         </View>
 
         {/* User Stats */}
@@ -335,6 +391,75 @@ export default function QuestsScreen() {
             <ThemedText style={styles.levelProgressPercent}>{Math.round(userStats.levelProgress)}%</ThemedText>
           </View>
         </ThemedView>
+
+        {/* Test Quest Actions */}
+        {userId && (
+          <ThemedView style={styles.testActionsContainer}>
+            <ThemedText type="subtitle" style={styles.testActionsTitle}>Test Quest Actions</ThemedText>
+            <ThemedText style={styles.debugInfo}>User ID: {userId}</ThemedText>
+            <View style={styles.testActionsGrid}>
+              <Pressable
+                style={[styles.testActionButton, { backgroundColor: '#4caf50' }]}
+                onPress={async () => {
+                  const results = await questService.trackScanningAction(userId);
+                  await questService.checkCompletedQuests(results);
+                  await refreshQuests();
+                }}
+              >
+                <MaterialIcons name="camera-alt" size={20} color="white" />
+                <ThemedText style={styles.testActionText}>Scan Item</ThemedText>
+              </Pressable>
+              
+              <Pressable
+                style={[styles.testActionButton, { backgroundColor: '#2196f3' }]}
+                onPress={async () => {
+                  const results = await questService.trackProfileCompletion(userId);
+                  await questService.checkCompletedQuests(results);
+                  await refreshQuests();
+                }}
+              >
+                <MaterialIcons name="person" size={20} color="white" />
+                <ThemedText style={styles.testActionText}>Complete Profile</ThemedText>
+              </Pressable>
+              
+              <Pressable
+                style={[styles.testActionButton, { backgroundColor: '#ff9800' }]}
+                onPress={async () => {
+                  const results = await questService.trackRecyclingProjectAction(userId);
+                  await questService.checkCompletedQuests(results);
+                  await refreshQuests();
+                }}
+              >
+                <MaterialIcons name="recycling" size={20} color="white" />
+                <ThemedText style={styles.testActionText}>Recycling Project</ThemedText>
+              </Pressable>
+              
+              <Pressable
+                style={[styles.testActionButton, { backgroundColor: '#9c27b0' }]}
+                onPress={async () => {
+                  const results = await questService.trackCommunityAction(userId);
+                  await questService.checkCompletedQuests(results);
+                  await refreshQuests();
+                }}
+              >
+                <MaterialIcons name="people" size={20} color="white" />
+                <ThemedText style={styles.testActionText}>Community Action</ThemedText>
+              </Pressable>
+              
+              <Pressable
+                style={[styles.testActionButton, { backgroundColor: '#4caf50' }]}
+                onPress={async () => {
+                  const results = await questService.trackLocationAction(userId);
+                  await questService.checkCompletedQuests(results);
+                  await refreshQuests();
+                }}
+              >
+                <MaterialIcons name="place" size={20} color="white" />
+                <ThemedText style={styles.testActionText}>Location Action</ThemedText>
+              </Pressable>
+            </View>
+          </ThemedView>
+        )}
 
         {/* Category Filter */}
         <View style={styles.categoryContainer}>
@@ -466,6 +591,14 @@ const styles = StyleSheet.create({
   titleContainer: {
     flex: 1,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  refreshButton: {
+    padding: 8,
+    marginRight: 8,
+  },
   settingsButton: {
     padding: 8,
   },
@@ -559,6 +692,50 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'right',
     marginTop: 4,
+  },
+  testActionsContainer: {
+    margin: 16,
+    padding: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  testActionsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  debugInfo: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 12,
+    textAlign: 'center',
+    fontFamily: 'monospace',
+  },
+  testActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  testActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: '48%',
+    gap: 6,
+  },
+  testActionText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
   },
   categoryContainer: {
     marginHorizontal: 16,

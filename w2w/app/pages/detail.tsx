@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, ScrollView, Image, TextInput, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
@@ -6,6 +6,12 @@ import { ThemedView } from '@/components/ThemedView';
 import { getUserId } from '@/lib/user';
 import { useLocation } from '@/hooks/useLocation';
 import { useClimateStorage } from '@/hooks/useClimateStorage';
+import { AuthGuard } from '@/components/AuthGuard';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
+import EducationalContentModal from '@/components/EducationalContentModal';
+import { educationalService, EducationalContent } from '@/lib/educationalService';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const LOG_URL = 'http://127.0.0.1:5000/log';
 const API_BASE_URL = 'http://127.0.0.1:5000';
@@ -58,9 +64,10 @@ interface DetailPageData {
     relatedMaterials: MaterialData[];
 }
 
-export default function DetailScreen() {
+function DetailScreen() {
     const params = useLocalSearchParams();
     const router = useRouter();
+    const { userId } = useAuth();
     const [pageData, setPageData] = useState<DetailPageData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -72,9 +79,44 @@ export default function DetailScreen() {
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
     const [isSelectingImage, setIsSelectingImage] = useState(false);
     
+    // Educational content state
+    const [educationalModalVisible, setEducationalModalVisible] = useState(false);
+    const [educationalContent, setEducationalContent] = useState<EducationalContent | null>(null);
+    const [educationalLoading, setEducationalLoading] = useState(false);
+    const [currentMaterialName, setCurrentMaterialName] = useState<string>('');
+    const educationalContentShown = useRef(false);
+    
     // Location and climate storage hooks
     const { location } = useLocation();
     const { climateData, location: storedLocation, isDataFresh, fetchClimateData } = useClimateStorage();
+
+    // Function to fetch and show educational content
+    const fetchAndShowEducationalContent = useCallback(async (materialName: string) => {
+        try {
+            console.log(`[Detail] 📚 Fetching educational content for: ${materialName}`);
+            setEducationalLoading(true);
+            setCurrentMaterialName(materialName);
+            
+            const response = await educationalService.getEducationalContent(materialName);
+            
+            if (response.success && response.content) {
+                console.log(`[Detail] ✅ Educational content loaded from ${response.source}`);
+                setEducationalContent(response.content);
+                setEducationalModalVisible(true);
+            } else {
+                console.log(`[Detail] ❌ Failed to load educational content: ${response.error}`);
+                // Still show modal with error state
+                setEducationalContent(null);
+                setEducationalModalVisible(true);
+            }
+        } catch (error) {
+            console.error('[Detail] ❌ Error fetching educational content:', error);
+            setEducationalContent(null);
+            setEducationalModalVisible(true);
+        } finally {
+            setEducationalLoading(false);
+        }
+    }, []);
     
     // Debug climate and location data
     console.log('[Detail Page] 🔍 Climate and Location Debug:');
@@ -94,6 +136,47 @@ export default function DetailScreen() {
             });
         }
     }, [location, climateData, fetchClimateData]);
+
+    // Show educational content when page loads with scan data
+    useEffect(() => {
+        console.log(`[Detail Page] 🔍 useEffect triggered - scanData:`, scanData);
+        console.log(`[Detail Page] 🔍 educationalModalVisible:`, educationalModalVisible);
+        console.log(`[Detail Page] 🔍 educationalContentShown.current:`, educationalContentShown.current);
+        
+        // Reset the ref when scanData changes (new scan)
+        if (scanData) {
+            educationalContentShown.current = false;
+        }
+        
+        // Try to find material name in different possible fields
+        let materialName = null;
+        if (scanData) {
+            materialName = scanData.material_name || 
+                          scanData.materialName || 
+                          (scanData['Scanned Material'] && scanData['Scanned Material'][0] && scanData['Scanned Material'][0].Name) ||
+                          scanData.Name;
+        }
+        
+        console.log(`[Detail Page] 🔍 Found material name:`, materialName);
+        
+        if (scanData && materialName && !educationalContentShown.current) {
+            console.log(`[Detail Page] 📚 Page loaded with scan data for material: ${materialName}`);
+            educationalContentShown.current = true; // Mark as shown to prevent multiple calls
+            
+            // Add a small delay to ensure the page is fully loaded
+            const timer = setTimeout(() => {
+                console.log(`[Detail Page] 📚 Timer triggered, calling fetchAndShowEducationalContent`);
+                fetchAndShowEducationalContent(materialName);
+            }, 1000);
+            
+            return () => clearTimeout(timer);
+        } else {
+            console.log(`[Detail Page] ❌ Conditions not met for educational content trigger:`);
+            console.log(`  - scanData exists: ${!!scanData}`);
+            console.log(`  - materialName found: ${!!materialName}`);
+            console.log(`  - not already shown: ${!educationalContentShown.current}`);
+        }
+    }, [scanData, fetchAndShowEducationalContent]);
 
     // Handle image selection for new materials
     const handleImageSelection = async (imageIndex: number) => {
@@ -128,6 +211,18 @@ export default function DetailScreen() {
                     } : null);
                     
                     setShowImageSelection(false);
+                    
+                    // Track quest progress for scanning action
+                    console.log('📸 Tracking scanning action: Material creation');
+                    try {
+                        if (userId) {
+                            const results = await questService.trackScanningAction(userId);
+                            await questService.checkCompletedQuests(results);
+                            console.log('✅ Scanning quest progress updated:', results);
+                        }
+                    } catch (questError) {
+                        console.error('❌ Error tracking scanning quest:', questError);
+                    }
                     
                     // Refresh the page to load the new material's details
                     if (result.material.id) {
@@ -166,6 +261,18 @@ export default function DetailScreen() {
                     } : null);
                     
                     setShowImageSelection(false);
+                    
+                    // Track quest progress for scanning action
+                    console.log('📸 Tracking scanning action: Material creation with image');
+                    try {
+                        if (userId) {
+                            const results = await questService.trackScanningAction(userId);
+                            await questService.checkCompletedQuests(results);
+                            console.log('✅ Scanning quest progress updated:', results);
+                        }
+                    } catch (questError) {
+                        console.error('❌ Error tracking scanning quest:', questError);
+                    }
                     
                     // Refresh the page to load the new material's details
                     if (result.material.id) {
@@ -649,6 +756,7 @@ export default function DetailScreen() {
                 if (params.scanData) {
                     console.log('[Detail Page] Loading from scan data...');
                     const data = JSON.parse(params.scanData as string);
+                    console.log('[Detail Page] 📊 Parsed scan data:', JSON.stringify(data, null, 2));
                     setScanData(data);
                     
                     if (data['Scanned Material'] && data['Scanned Material'].length > 0) {
@@ -861,6 +969,16 @@ export default function DetailScreen() {
                 <ThemedText style={styles.traitsText}>
                     {pageData.material.Traits.join(', ')}
                 </ThemedText>
+                
+                {/* Educational Content Button */}
+                <TouchableOpacity 
+                    style={styles.educationalButton}
+                    onPress={() => fetchAndShowEducationalContent(pageData.material.Name)}
+                    activeOpacity={0.7}
+                >
+                    <MaterialIcons name="school" size={20} color="#fff" />
+                    <ThemedText style={styles.educationalButtonText}>Learn More</ThemedText>
+                </TouchableOpacity>
             </ThemedView>
 
             {/* Middle Division */}
@@ -998,6 +1116,18 @@ export default function DetailScreen() {
                 })()}
             </ThemedView>
             </ScrollView>
+            
+            {/* Educational Content Modal */}
+                <EducationalContentModal
+                    visible={educationalModalVisible}
+                    onClose={() => {
+                        setEducationalModalVisible(false);
+                        educationalContentShown.current = false; // Reset for next scan
+                    }}
+                    content={educationalContent}
+                    loading={educationalLoading}
+                    materialName={currentMaterialName}
+                />
         </ThemedView>
     );
 }
@@ -1383,4 +1513,35 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
     },
+    educationalButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#007AFF',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 25,
+        marginTop: 15,
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5,
+    },
+    educationalButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+        marginLeft: 8,
+    },
 });
+
+export default function DetailScreenWithAuth() {
+    return (
+        <AuthGuard>
+            <DetailScreen />
+        </AuthGuard>
+    );
+}

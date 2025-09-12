@@ -7,6 +7,8 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { Pressable } from 'react-native';
@@ -15,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 export default function ProfileSettingsScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
+  const { userId: authUserId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [profileData, setProfileData] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -250,6 +253,18 @@ export default function ProfileSettingsScreen() {
         setProfileImageUrl(response.imageUrl);
         Alert.alert('Success', 'Profile image updated successfully!');
         
+        // Track quest progress for profile action
+        console.log('👤 Tracking profile action: Add profile photo');
+        try {
+          if (authUserId) {
+            const results = await questService.trackProfileCompletion(authUserId);
+            await questService.checkCompletedQuests(results);
+            console.log('✅ Profile quest progress updated:', results);
+          }
+        } catch (questError) {
+          console.error('❌ Error tracking profile quest:', questError);
+        }
+        
         // Refresh profile data to ensure we have the latest image from server
         console.log('🔄 Refreshing profile data after successful upload');
         await loadProfileData();
@@ -387,7 +402,13 @@ export default function ProfileSettingsScreen() {
           <View style={styles.infoItem}>
             <ThemedText style={styles.infoLabel}>Location</ThemedText>
             <ThemedText style={styles.infoValue}>
-              {profileData?.location || 'Not set'}
+              {profileData?.location ? 
+                (typeof profileData.location === 'string' ? 
+                  profileData.location : 
+                  `${profileData.location.latitude?.toFixed(4)}, ${profileData.location.longitude?.toFixed(4)}`
+                ) : 
+                'Not set'
+              }
             </ThemedText>
           </View>
 

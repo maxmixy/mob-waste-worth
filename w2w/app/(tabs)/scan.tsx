@@ -19,6 +19,8 @@ import SettingsSidebar from '@/components/SettingsSidebar';
 import { useLocation } from '@/hooks/useLocation';
 import { useClimate } from '@/hooks/useClimate';
 import { useDisposal } from '@/hooks/useDisposal';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Update this URL to the address where your backend is reachable from the device/emulator.
 // For local Python backend (this repo) the endpoint is POST /upload on port 5000.
@@ -32,6 +34,7 @@ const UPLOAD_URL = 'http://127.0.0.1:5000/upload';
 export default function HomeScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isFocused = useIsFocused();
+    const { userId } = useAuth();
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const cameraRef = useRef<CameraView>(null);
     const [isCameraReady, setIsCameraReady] = useState(false);
@@ -184,6 +187,18 @@ export default function HomeScreen() {
                      }
                  } else {
                      console.log('[Scan] Skipping disposal check - missing material name, location, or climate data');
+                 }
+                 
+                 // Track quest progress for scanning action
+                 console.log('📸 Tracking scanning action: Material scan');
+                 try {
+                   if (userId) {
+                     const results = await questService.trackScanningAction(userId);
+                     await questService.checkCompletedQuests(results);
+                     console.log('✅ Scanning quest progress updated:', results);
+                   }
+                 } catch (questError) {
+                   console.error('❌ Error tracking scanning quest:', questError);
                  }
                  
                  // Navigate to detail page with the scan data (including disposal data if available)

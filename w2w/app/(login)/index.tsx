@@ -6,35 +6,22 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { getAuth, signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { makeRedirectUri } from 'expo-auth-session';
 import { saveUserId, checkEULAAcceptance, checkProfileCompletion } from '@/lib/user';
 import { useLocation } from '@/hooks/useLocation';
 import { useClimateStorage } from '@/hooks/useClimateStorage';
-
-// ✅ Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyCxj-RNwupirseU_-mGR7LtsLGA86P_GVM",
-  authDomain: "waste-to-worth-7d5b0.firebaseapp.com",
-  projectId: "waste-to-worth-7d5b0",
-  storageBucket: "waste-to-worth-7d5b0.firebasestorage.app",
-  messagingSenderId: "648267234726",
-  appId: "1:648267234726:web:3e70721145557b2f316367",
-  measurementId: "G-E8563BL8PJ"
-};
-
-// ✅ only initialize Firebase once
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
+import { useAuth } from '@/contexts/AuthContext';
+import { auth } from '@/lib/firebase';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginPage() {
   const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
 
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
@@ -45,6 +32,14 @@ export default function LoginPage() {
   // Location and climate storage hooks
   const { location } = useLocation();
   const { fetchClimateData } = useClimateStorage();
+
+  // Redirect authenticated users to main app
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      console.log('[Login] ✅ User already authenticated, redirecting to main app');
+      router.replace('/(tabs)/' as any);
+    }
+  }, [isAuthenticated, isLoading, router]);
 
   // Handle post-login flow with climate data fetching
   const handlePostLogin = async (userId: string) => {
@@ -90,12 +85,12 @@ export default function LoginPage() {
       }
 
       console.log('[Login] 🚀 Navigating to main app');
-      router.replace('/(tabs)');
+      router.replace('/(tabs)/' as any);
       
     } catch (error) {
       console.error('[Login] ❌ Error in post-login flow:', error);
       // Still navigate to main app even if climate data fails
-      router.replace('/(tabs)');
+      router.replace('/(tabs)/' as any);
     }
   };
 
@@ -169,6 +164,24 @@ export default function LoginPage() {
       setEmailError('Google login failed.');
     }
   };
+
+  // Show loading while checking authentication
+  if (isLoading) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Checking authentication...</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  // Don't render login form if user is already authenticated (redirect will happen)
+  if (isAuthenticated) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Redirecting to main app...</ThemedText>
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>

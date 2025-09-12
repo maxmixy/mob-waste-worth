@@ -11,6 +11,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
+import { questService } from '@/lib/questService';
 import { ScrollView as RNScrollView } from 'react-native';
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -152,6 +153,16 @@ export default function CommunityScreen() {
         
         // Reload posts to show the new one
         await loadPosts();
+        
+        // Track quest progress for community action (creating posts)
+        console.log('📝 Tracking community action: Create post (modal)');
+        try {
+          const results = await questService.trackCommunityAction(currentUserId);
+          await questService.checkCompletedQuests(results);
+          console.log('✅ Community quest progress updated:', results);
+        } catch (questError) {
+          console.error('❌ Error tracking community quest:', questError);
+        }
         
         Alert.alert('Success', 'Your post has been shared!');
       } else {
@@ -334,6 +345,16 @@ export default function CommunityScreen() {
         // Revert on error
         setPosts(posts);
         console.error('Failed to like post');
+      } else {
+        // Track quest progress for community action (liking posts)
+        console.log('👍 Tracking community action: Like post');
+        try {
+          const results = await questService.trackCommunityAction(userId);
+          await questService.checkCompletedQuests(results);
+          console.log('✅ Community quest progress updated:', results);
+        } catch (questError) {
+          console.error('❌ Error tracking community quest:', questError);
+        }
       }
     } catch (err) {
       // Revert on error
@@ -430,6 +451,17 @@ export default function CommunityScreen() {
         setSelectedImages([]);
         // Reload posts to show the new one
         loadPosts();
+        
+        // Track quest progress for community action (creating posts)
+        console.log('📝 Tracking community action: Create post');
+        try {
+          const results = await questService.trackCommunityAction(userId);
+          await questService.checkCompletedQuests(results);
+          console.log('✅ Community quest progress updated:', results);
+        } catch (questError) {
+          console.error('❌ Error tracking community quest:', questError);
+        }
+        
         Alert.alert('Success', `Post created successfully with ${imagePaths.length} image${imagePaths.length !== 1 ? 's' : ''}! 🎉`);
       } else {
         const errorResult = await response.json();
