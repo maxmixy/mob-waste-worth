@@ -7,12 +7,12 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
 import { getUserId } from '@/lib/user';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import SettingsSidebar from '@/components/SettingsSidebar';
 import { ScrollView as RNScrollView } from 'react-native';
-import { Radii, Spacing, Shadows } from '@/constants/DesignTokens';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -21,7 +21,7 @@ interface MaterialData {
   id: string;
   Name: string;
   Traits: string[];
-  imageUrl?: string;
+  ImageUrl?: string;
 }
 
 interface RecyclingProject {
@@ -41,8 +41,8 @@ interface ScanHistoryItem {
 
 export default function HistoryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
-  const P = usePalette();
   const router = useRouter();
+  const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -169,8 +169,8 @@ export default function HistoryScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: P.background }]}> 
-        <ActivityIndicator size="large" color={P.icon} />
+      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
+        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
         <ThemedText style={styles.loadingText}>Loading scan history...</ThemedText>
       </View>
     );
@@ -178,7 +178,7 @@ export default function HistoryScreen() {
 
   if (error) {
     return (
-      <View style={[styles.errorContainer, { backgroundColor: P.background }]}> 
+      <View style={[styles.errorContainer, { backgroundColor: Colors[colorScheme].background }]}>
         <ThemedText style={styles.errorText}>{error}</ThemedText>
       </View>
     );
@@ -191,19 +191,19 @@ export default function HistoryScreen() {
         onClose={() => setSidebarVisible(false)} 
       />
       <RNScrollView
-        style={{ flex: 1, padding: 16, backgroundColor: P.background }}
+        style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
         contentContainerStyle={{ flexGrow: 1 }}
       >
-        <View style={[styles.headerRow, { marginTop: Spacing.lg, marginBottom: Spacing.md }]}>
+        <View style={styles.headerRow}>
           <ThemedView style={styles.titleContainer}>
             <ThemedText type="title">Scan History</ThemedText>
           </ThemedView>
           <Pressable
-            style={[styles.settingsButton, { backgroundColor: P.backgroundSecondary, borderRadius: Radii.lg, padding: Spacing.xs }]}
+            style={styles.settingsButton}
             onPress={() => setSidebarVisible(true)}
             accessibilityLabel="Settings"
           >
-            <MaterialIcons name="settings" size={24} color={P.icon} />
+            <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
           </Pressable>
         </View>
         
@@ -213,14 +213,14 @@ export default function HistoryScreen() {
         
         {scanHistory.length > 0 ? (
           scanHistory.map((scanItem, index) => (
-            <View key={scanItem.material.id} style={[styles.scanCard, { backgroundColor: P.card, borderRadius: Radii.md, ...(Shadows.soft as any) }]}> 
+            <View key={scanItem.material.id} style={styles.scanCard}>
               <TouchableOpacity 
                 style={styles.scanCardTop}
                 onPress={() => navigateToMaterialDetail(scanItem.material.id)}
                 activeOpacity={0.7}
               >
                 <Image
-                  source={scanItem.material.imageUrl ? { uri: scanItem.material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
+                  source={scanItem.material.ImageUrl ? { uri: scanItem.material.ImageUrl } : require('@/assets/images/partial-react-logo.png')}
                   style={styles.scanCardImage}
                   resizeMode="cover"
                 />

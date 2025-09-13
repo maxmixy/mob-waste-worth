@@ -6,41 +6,93 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
-import { getAuth, signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { makeRedirectUri } from 'expo-auth-session';
 import { saveUserId, checkEULAAcceptance, checkProfileCompletion } from '@/lib/user';
-
-// ✅ Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyCxj-RNwupirseU_-mGR7LtsLGA86P_GVM",
-  authDomain: "waste-to-worth-7d5b0.firebaseapp.com",
-  projectId: "waste-to-worth-7d5b0",
-  storageBucket: "waste-to-worth-7d5b0.firebasestorage.app",
-  messagingSenderId: "648267234726",
-  appId: "1:648267234726:web:3e70721145557b2f316367",
-  measurementId: "G-E8563BL8PJ"
-};
-
-// ✅ only initialize Firebase once
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
+import { useLocation } from '@/hooks/useLocation';
+import { useClimateStorage } from '@/hooks/useClimateStorage';
+import { useAuth } from '@/contexts/AuthContext';
+import { auth } from '@/lib/firebaseConfig';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginPage() {
   const colorScheme = useColorScheme() ?? 'light';
-  const P = usePalette();
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
 
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+
+  // Location and climate storage hooks
+  const { location } = useLocation();
+  const { fetchClimateData } = useClimateStorage();
+
+  // Redirect authenticated users to main app
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      console.log('[Login] ✅ User already authenticated, redirecting to main app');
+      router.replace('/(tabs)/' as any);
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  // Handle post-login flow with climate data fetching
+  const handlePostLogin = async (userId: string) => {
+    try {
+      console.log('[Login] 🔐 Login successful, checking user status...');
+      
+      // Check EULA acceptance
+      const eulaStatus = await checkEULAAcceptance(userId);
+      if (!eulaStatus.eulaAccepted) {
+        console.log('[Login] 📋 User needs to accept EULA');
+        router.replace('/(login)/eula');
+        return;
+      }
+
+      // Check profile completion status
+      const profileStatus = await checkProfileCompletion(userId);
+      
+      if (!profileStatus.profileCompleted) {
+        console.log('[Login] 👤 User needs to create profile');
+        router.replace('/(login)/profile');
+        return;
+      }
+
+      // User has completed both EULA and profile, fetch climate data and proceed to main app
+      console.log('[Login] ✅ User setup complete, fetching climate data...');
+      console.log('[Login] 🔍 Current location status:', location);
+      
+      if (location) {
+        console.log('[Login] 🌡️ Fetching climate data for location:', location);
+        try {
+          await fetchClimateData(location);
+          console.log('[Login] ✅ Climate data fetched and stored successfully');
+        } catch (error) {
+          console.error('[Login] ❌ Error fetching climate data:', error);
+          console.log('[Login] ⚠️ Continuing without climate data');
+        }
+      } else {
+        console.log('[Login] ⚠️ No location available, climate data will be fetched later');
+        console.log('[Login] 💡 This could be because:');
+        console.log('  - Location permission not granted');
+        console.log('  - Location service not available');
+        console.log('  - Location still loading');
+      }
+
+      console.log('[Login] 🚀 Navigating to main app');
+      router.replace('/(tabs)/' as any);
+      
+    } catch (error) {
+      console.error('[Login] ❌ Error in post-login flow:', error);
+      // Still navigate to main app even if climate data fails
+      router.replace('/(tabs)/' as any);
+    }
+  };
 
   const handleLogin = async () => {
     setLoading(true);
@@ -64,25 +116,8 @@ export default function LoginPage() {
       if (userCredential?.user?.uid) {
         await saveUserId(userCredential.user.uid);
         
-        // Check EULA acceptance status
-        const eulaStatus = await checkEULAAcceptance(userCredential.user.uid);
-        
-        if (!eulaStatus.eulaAccepted) {
-          // User needs to accept EULA first
-          router.replace('/(login)/eula');
-          return;
-        }
-
-        // Check profile completion status
-        const profileStatus = await checkProfileCompletion(userCredential.user.uid);
-        
-        if (!profileStatus.profileCompleted) {
-          // User needs to create their profile
-          router.replace('/(login)/profile');
-        } else {
-          // User has completed both EULA and profile, proceed to main app
-          router.replace('/(tabs)');
-        }
+        // Handle post-login flow (EULA, profile, climate data)
+        await handlePostLogin(userCredential.user.uid);
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -112,25 +147,8 @@ export default function LoginPage() {
           if (uc?.user?.uid) {
             await saveUserId(uc.user.uid);
             
-            // Check EULA acceptance status
-            const eulaStatus = await checkEULAAcceptance(uc.user.uid);
-            
-            if (!eulaStatus.eulaAccepted) {
-              // User needs to accept EULA first
-              router.replace('/(login)/eula');
-              return;
-            }
-
-            // Check profile completion status
-            const profileStatus = await checkProfileCompletion(uc.user.uid);
-            
-            if (!profileStatus.profileCompleted) {
-              // User needs to create their profile
-              router.replace('/(login)/profile');
-            } else {
-              // User has completed both EULA and profile, proceed to main app
-              router.replace('/(tabs)');
-            }
+            // Handle post-login flow (EULA, profile, climate data)
+            await handlePostLogin(uc.user.uid);
           }
         })
         .catch(() => setEmailError('Google sign-in failed.'));
@@ -147,8 +165,26 @@ export default function LoginPage() {
     }
   };
 
+  // Show loading while checking authentication
+  if (isLoading) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Checking authentication...</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  // Don't render login form if user is already authenticated (redirect will happen)
+  if (isAuthenticated) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Redirecting to main app...</ThemedText>
+      </ThemedView>
+    );
+  }
+
   return (
-    <ThemedView style={[styles.container, { backgroundColor: P.background }]}> 
+    <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>
       {/* Logo */}
       <ThemedView style={styles.imageContainer}>
         <Image
@@ -170,31 +206,31 @@ export default function LoginPage() {
       <ThemedView style={{ width: '100%', maxWidth: 340, marginBottom: 8 }}>
         <ThemedText style={{ marginBottom: 4 }}>Email</ThemedText>
         <TextInput
-          style={[styles.input, { borderColor: P.border, color: P.text, backgroundColor: P.backgroundSecondary }]}
+          style={styles.input}
           autoCapitalize="none"
           keyboardType="email-address"
           value={email}
           onChangeText={(t) => { setEmail(t); setEmailError(''); setPasswordError(''); }}
           placeholder="Enter your email"
-          placeholderTextColor={P.text + '80'}
+          placeholderTextColor="#888"
         />
         {emailError ? <Text style={styles.inlineError}>{emailError}</Text> : null}
 
         <ThemedText style={{ marginBottom: 4 }}>Password</ThemedText>
         <TextInput
-          style={[styles.input, { borderColor: P.border, color: P.text, backgroundColor: P.backgroundSecondary }]}
+          style={styles.input}
           secureTextEntry
           value={password}
           onChangeText={(t) => { setPassword(t); setEmailError(''); setPasswordError(''); }}
           placeholder="Enter your password"
-          placeholderTextColor={P.text + '80'}
+          placeholderTextColor="#888"
         />
         {passwordError ? <Text style={styles.inlineError}>{passwordError}</Text> : null}
       </ThemedView>
 
       {/* Log in button */}
       <TouchableOpacity
-        style={[styles.button, { backgroundColor: P.primary }]}
+        style={[styles.button, styles.loginButton]}
         onPress={handleLogin}
         disabled={loading}
       >
@@ -203,7 +239,7 @@ export default function LoginPage() {
 
       {/* Sign up button */}
       <TouchableOpacity
-        style={[styles.button, { marginTop: 12, backgroundColor: P.accent }]}
+        style={[styles.button, { marginTop: 12 }]}
         onPress={() => router.push('/(login)/signup')}
       >
         <ThemedText style={styles.buttonText}>Create account</ThemedText>
@@ -212,13 +248,13 @@ export default function LoginPage() {
       {/* Social login */}
       <ThemedView style={styles.socialRow}>
         <TouchableOpacity
-          style={[styles.button, styles.googleButton, { flex: 1, marginRight: 6, borderColor: P.border, backgroundColor: P.background }]}
+          style={[styles.button, styles.googleButton, { flex: 1, marginRight: 6 }]}
           onPress={handleGoogleLogin}
         >
-          <ThemedText style={[styles.buttonText, { color: '#4285F4' }]}>Google</ThemedText>
+          <ThemedText style={[styles.buttonText, styles.googleButtonText]}>Google</ThemedText>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.button, { flex: 1, marginLeft: 6, backgroundColor: '#1877F3' }]}
+          style={[styles.button, styles.facebookButton, { flex: 1, marginLeft: 6 }]}
           onPress={() => alert('Facebook login not implemented')}
         >
           <ThemedText style={[styles.buttonText, styles.facebookButtonText]}>Facebook</ThemedText>
@@ -235,8 +271,10 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
+    borderColor: '#ccc',
     marginBottom: 8,
     fontSize: 16,
+    color: '#222',
   },
   title: { marginBottom: 12, fontSize: 28, fontWeight: '700' },
   subtitle: { fontSize: 16, color: '#555', textAlign: 'center', marginBottom: 18, maxWidth: 320 },
@@ -256,7 +294,9 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   googleButton: {
+    backgroundColor: '#fff',
     borderWidth: 1,
+    borderColor: '#ddd',
   },
   googleButtonText: { color: '#4285F4' },
   facebookButton: { backgroundColor: '#1877F3' },

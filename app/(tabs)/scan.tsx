@@ -15,8 +15,12 @@ import { ThemedView } from '@/components/ThemedView';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
 import SettingsSidebar from '@/components/SettingsSidebar';
+import { useLocation } from '@/hooks/useLocation';
+import { useClimate } from '@/hooks/useClimate';
+import { useDisposal } from '@/hooks/useDisposal';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Update this URL to the address where your backend is reachable from the device/emulator.
 // For local Python backend (this repo) the endpoint is POST /upload on port 5000.
@@ -29,19 +33,43 @@ const UPLOAD_URL = 'http://127.0.0.1:5000/upload';
 
 export default function HomeScreen() {
     const colorScheme = useColorScheme() ?? 'light';
-    const P = usePalette();
     const isFocused = useIsFocused();
+    const { userId } = useAuth();
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const cameraRef = useRef<CameraView>(null);
     const [isCameraReady, setIsCameraReady] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [sidebarVisible, setSidebarVisible] = useState(false);
     
+    // Location, climate, and disposal functionality
+    const { location, getCurrentLocation } = useLocation();
+    const { climateData, getClimateForLocation } = useClimate();
+    const { disposalData, loading: disposalLoading, error: disposalError, getDisposalForMaterial } = useDisposal();
+    
     useEffect(() => {
         if (!cameraPermission?.granted) {
         requestCameraPermission();
         }
     }, [cameraPermission]);
+    
+    // Get location and climate data when component mounts
+    useEffect(() => {
+        const initializeLocationAndClimate = async () => {
+            try {
+                console.log('[Scan] Initializing location and climate data...');
+                const currentLocation = await getCurrentLocation();
+                if (currentLocation) {
+                    console.log('[Scan] Location obtained, getting climate data...');
+                    await getClimateForLocation(currentLocation);
+                }
+            } catch (error) {
+                console.error('[Scan] Error initializing location/climate:', error);
+                // Continue without location/climate data
+            }
+        };
+        
+        initializeLocationAndClimate();
+    }, []);
     
     if (!cameraPermission) {
         return (
@@ -127,7 +155,53 @@ export default function HomeScreen() {
                  try { json = JSON.parse(text); } catch (e) { json = { raw: text }; }
                  console.log('Upload response', json);
                  
-                 // Navigate to detail page with the scan data
+                 // Check for disposal methods if material was identified
+                 if (json && json.material_name && location && climateData) {
+                     console.log('[Scan] Checking disposal methods for scanned material:', json.material_name);
+                     try {
+                         const disposalResponse = await getDisposalForMaterial({
+                             materialName: json.material_name,
+                             climateData: climateData,
+                             location: {
+                                 latitude: location.latitude,
+                                 longitude: location.longitude
+                             }
+                         });
+                         
+                         if (disposalResponse.found && disposalResponse.disposalData) {
+                             console.log('[Scan] Disposal method found:', {
+                                 materialName: disposalResponse.disposalData.material_name,
+                                 stepsCount: disposalResponse.disposalData.disposal_steps.length,
+                                 aiGenerated: disposalResponse.aiGenerated
+                             });
+                             
+                             // Add disposal data to the scan response
+                             json.disposal_data = disposalResponse.disposalData;
+                             json.disposal_ai_generated = disposalResponse.aiGenerated;
+                         } else {
+                             console.log('[Scan] No disposal method found for material');
+                         }
+                     } catch (disposalError) {
+                         console.error('[Scan] Error checking disposal methods:', disposalError);
+                         // Continue without disposal data
+                     }
+                 } else {
+                     console.log('[Scan] Skipping disposal check - missing material name, location, or climate data');
+                 }
+                 
+                 // Track quest progress for scanning action
+                 console.log('📸 Tracking scanning action: Material scan');
+                 try {
+                   if (userId) {
+                     const results = await questService.trackScanningAction(userId);
+                     await questService.checkCompletedQuests(results);
+                     console.log('✅ Scanning quest progress updated:', results);
+                   }
+                 } catch (questError) {
+                   console.error('❌ Error tracking scanning quest:', questError);
+                 }
+                 
+                 // Navigate to detail page with the scan data (including disposal data if available)
                  router.push({
                      pathname: '/pages/detail',
                      params: { scanData: JSON.stringify(json) }
@@ -159,18 +233,18 @@ export default function HomeScreen() {
             {/* Settings Button */}
             <ThemedView style={styles.settingsButtonContainer} pointerEvents="auto">
                 <Pressable
-                    style={[styles.settingsButton, { backgroundColor: 'rgba(0,0,0,0.35)' }]}
+                    style={styles.settingsButton}
                     onPress={() => setSidebarVisible(true)}
                     accessibilityLabel="Settings"
                 >
                     <MaterialIcons 
                         name="settings" 
                         size={24} 
-                        color={P.icon} 
+                        color={Colors[colorScheme].icon} 
                     />
                 </Pressable>
             </ThemedView>
-            <ThemedView style={[styles.bottomWindow, { backgroundColor: 'rgba(0,0,0,0.45)', borderColor: P.border }]} pointerEvents="none">
+            <ThemedView style={styles.bottomWindow} pointerEvents="none">
                 <ThemedText type="title" style={styles.centeredText}>Scan Your Waste</ThemedText>
                 <ThemedText type="subtitle" style={styles.centeredText}>Hold your waste item steady in front of the camera. <br/>
                 Make sure it’s fully visible and nothing is blocking the view.</ThemedText>
@@ -180,7 +254,7 @@ export default function HomeScreen() {
                 {uploading ? (
                     <ActivityIndicator size="large" color="#fff" />
                 ) : (
-                    <ThemedText style={[styles.captureButton, { backgroundColor: '#fff', color: '#222' }]} onPress={handleCaptureImage}>Capture</ThemedText>
+                    <ThemedText style={styles.captureButton} onPress={handleCaptureImage}>Capture</ThemedText>
                 )}
             </ThemedView>
         </ThemedView>

@@ -5,12 +5,10 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
 import { getUserId, updateUserProfile } from '@/lib/user';
 
 export default function ProfileCreationPage() {
   const colorScheme = useColorScheme() ?? 'light';
-  const P = usePalette();
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
@@ -85,7 +83,7 @@ export default function ProfileCreationPage() {
   };
 
   return (
-    <ThemedView style={[styles.container, { backgroundColor: P.background }]}>
+    <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <ThemedText type="title" style={styles.title}>
           Create Your Profile
@@ -103,15 +101,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.input,
                 { 
-                  backgroundColor: P.backgroundSecondary,
-                  borderColor: firstNameError ? '#f44336' : P.border,
-                  color: P.text
+                  backgroundColor: Colors[colorScheme].background,
+                  borderColor: firstNameError ? '#f44336' : Colors[colorScheme].text + '20',
+                  color: Colors[colorScheme].text
                 }
               ]}
               value={firstName}
               onChangeText={setFirstName}
               placeholder="Enter your first name"
-              placeholderTextColor={P.text + '60'}
+              placeholderTextColor={Colors[colorScheme].text + '60'}
               autoCapitalize="words"
             />
             {firstNameError ? <ThemedText style={styles.errorText}>{firstNameError}</ThemedText> : null}
@@ -124,15 +122,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.input,
                 { 
-                  backgroundColor: P.backgroundSecondary,
-                  borderColor: lastNameError ? '#f44336' : P.border,
-                  color: P.text
+                  backgroundColor: Colors[colorScheme].background,
+                  borderColor: lastNameError ? '#f44336' : Colors[colorScheme].text + '20',
+                  color: Colors[colorScheme].text
                 }
               ]}
               value={lastName}
               onChangeText={setLastName}
               placeholder="Enter your last name"
-              placeholderTextColor={P.text + '60'}
+              placeholderTextColor={Colors[colorScheme].text + '60'}
               autoCapitalize="words"
             />
             {lastNameError ? <ThemedText style={styles.errorText}>{lastNameError}</ThemedText> : null}
@@ -145,15 +143,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.input,
                 { 
-                  backgroundColor: P.backgroundSecondary,
-                  borderColor: ageError ? '#f44336' : P.border,
-                  color: P.text
+                  backgroundColor: Colors[colorScheme].background,
+                  borderColor: ageError ? '#f44336' : Colors[colorScheme].text + '20',
+                  color: Colors[colorScheme].text
                 }
               ]}
               value={age}
               onChangeText={setAge}
               placeholder="Enter your age"
-              placeholderTextColor={P.text + '60'}
+              placeholderTextColor={Colors[colorScheme].text + '60'}
               keyboardType="numeric"
               maxLength={3}
             />
@@ -167,15 +165,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.input,
                 { 
-                  backgroundColor: P.backgroundSecondary,
-                  borderColor: P.border,
-                  color: P.text
+                  backgroundColor: Colors[colorScheme].background,
+                  borderColor: Colors[colorScheme].text + '20',
+                  color: Colors[colorScheme].text
                 }
               ]}
               value={location}
               onChangeText={setLocation}
               placeholder="City, Country"
-              placeholderTextColor={P.text + '60'}
+              placeholderTextColor={Colors[colorScheme].text + '60'}
               autoCapitalize="words"
             />
           </ThemedView>
@@ -187,15 +185,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.textArea,
                 { 
-                  backgroundColor: P.backgroundSecondary,
-                  borderColor: P.border,
-                  color: P.text
+                  backgroundColor: Colors[colorScheme].background,
+                  borderColor: Colors[colorScheme].text + '20',
+                  color: Colors[colorScheme].text
                 }
               ]}
               value={interests}
               onChangeText={setInterests}
               placeholder="e.g., Recycling, Sustainability, Zero Waste, Gardening..."
-              placeholderTextColor={P.text + '60'}
+              placeholderTextColor={Colors[colorScheme].text + '60'}
               multiline
               numberOfLines={3}
               textAlignVertical="top"
@@ -207,13 +205,13 @@ export default function ProfileCreationPage() {
           <TouchableOpacity
             style={[
               styles.button,
-              { backgroundColor: P.primary },
+              styles.createButton,
               loading && styles.buttonDisabled
             ]}
             onPress={handleCreateProfile}
             disabled={loading}
           >
-            <ThemedText style={[styles.buttonText, { color: 'white' }]}>
+            <ThemedText style={[styles.buttonText, styles.createButtonText]}>
               {loading ? 'Creating Profile...' : 'Create Profile'}
             </ThemedText>
           </TouchableOpacity>

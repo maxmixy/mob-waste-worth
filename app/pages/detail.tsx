@@ -1,22 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, ScrollView, Image, TextInput, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { usePalette } from '@/hooks/usePalette';
-import { Radii, Spacing, Shadows } from '@/constants/DesignTokens';
 import { getUserId } from '@/lib/user';
+import { useLocation } from '@/hooks/useLocation';
+import { useClimateStorage } from '@/hooks/useClimateStorage';
+import { AuthGuard } from '@/components/AuthGuard';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
+import EducationalContentModal from '@/components/EducationalContentModal';
+import { educationalService, EducationalContent } from '@/lib/educationalService';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const LOG_URL = 'http://127.0.0.1:5000/log';
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Types for the data structure
+interface ImageOption {
+    url: string;
+    thumb: string;
+    alt_description: string;
+    description: string;
+    photographer: string;
+    photographer_url: string;
+    unsplash_url: string;
+}
+
 interface MaterialData {
     id: string;
     Name: string;
     Traits: string[];
-    imageUrl?: string;
+    ImageUrl?: string;
     disposalMethods?: string;
+    ImageOptions?: ImageOption[];
 }
 
 interface RecyclingProject {
@@ -28,17 +45,29 @@ interface RecyclingProject {
     steps: string[];
 }
 
+interface DisposalMethod {
+    id?: string;
+    material_name: string;
+    climate_classification: string;
+    climate_location: string;
+    disposal_steps: string[];
+    created_at?: string;
+    updated_at?: string;
+    isFallbackData?: boolean;
+    isStoredData?: boolean;
+}
+
 interface DetailPageData {
     material: MaterialData;
     recyclingProjects: RecyclingProject[];
-    disposalMethods: string;
+    disposalMethods: DisposalMethod | null;
     relatedMaterials: MaterialData[];
 }
 
-export default function DetailScreen() {
+function DetailScreen() {
     const params = useLocalSearchParams();
     const router = useRouter();
-    const P = usePalette();
+    const { userId } = useAuth();
     const [pageData, setPageData] = useState<DetailPageData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -46,15 +75,250 @@ export default function DetailScreen() {
     const [populatingProjects, setPopulatingProjects] = useState(false);
     const [generatingCustomProject, setGeneratingCustomProject] = useState(false);
     const [generateError, setGenerateError] = useState<string | null>(null);
+    const [showImageSelection, setShowImageSelection] = useState(false);
+    const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+    const [isSelectingImage, setIsSelectingImage] = useState(false);
+    
+    // Educational content state
+    const [educationalModalVisible, setEducationalModalVisible] = useState(false);
+    const [educationalContent, setEducationalContent] = useState<EducationalContent | null>(null);
+    const [educationalLoading, setEducationalLoading] = useState(false);
+    const [currentMaterialName, setCurrentMaterialName] = useState<string>('');
+    const educationalContentShown = useRef(false);
+    
+    // Location and climate storage hooks
+    const { location } = useLocation();
+    const { climateData, location: storedLocation, isDataFresh, fetchClimateData } = useClimateStorage();
+
+    // Function to fetch and show educational content
+    const fetchAndShowEducationalContent = useCallback(async (materialName: string) => {
+        try {
+            console.log(`[Detail] 📚 Fetching educational content for: ${materialName}`);
+            setEducationalLoading(true);
+            setCurrentMaterialName(materialName);
+            
+            const response = await educationalService.getEducationalContent(materialName);
+            
+            if (response.success && response.content) {
+                console.log(`[Detail] ✅ Educational content loaded from ${response.source}`);
+                setEducationalContent(response.content);
+                setEducationalModalVisible(true);
+            } else {
+                console.log(`[Detail] ❌ Failed to load educational content: ${response.error}`);
+                // Still show modal with error state
+                setEducationalContent(null);
+                setEducationalModalVisible(true);
+            }
+        } catch (error) {
+            console.error('[Detail] ❌ Error fetching educational content:', error);
+            setEducationalContent(null);
+            setEducationalModalVisible(true);
+        } finally {
+            setEducationalLoading(false);
+        }
+    }, []);
+    
+    // Debug climate and location data
+    console.log('[Detail Page] 🔍 Climate and Location Debug:');
+    console.log('  Current Location:', location);
+    console.log('  Stored Location:', storedLocation);
+    console.log('  Stored Climate Data:', climateData);
+    console.log('  Climate Data Available:', !!climateData);
+    console.log('  Data is Fresh:', isDataFresh);
+    console.log('  Current Location Available:', !!location);
+    
+    // Fallback: If we have location but no stored climate data, try to fetch it
+    useEffect(() => {
+        if (location && !climateData) {
+            console.log('[Detail Page] 🔄 No stored climate data, attempting to fetch...');
+            fetchClimateData(location).catch(error => {
+                console.error('[Detail Page] ❌ Failed to fetch climate data:', error);
+            });
+        }
+    }, [location, climateData, fetchClimateData]);
+
+    // Show educational content when page loads with scan data
+    useEffect(() => {
+        console.log(`[Detail Page] 🔍 useEffect triggered - scanData:`, scanData);
+        console.log(`[Detail Page] 🔍 educationalModalVisible:`, educationalModalVisible);
+        console.log(`[Detail Page] 🔍 educationalContentShown.current:`, educationalContentShown.current);
+        
+        // Reset the ref when scanData changes (new scan)
+        if (scanData) {
+            educationalContentShown.current = false;
+        }
+        
+        // Try to find material name in different possible fields
+        let materialName = null;
+        if (scanData) {
+            materialName = scanData.material_name || 
+                          scanData.materialName || 
+                          (scanData['Scanned Material'] && scanData['Scanned Material'][0] && scanData['Scanned Material'][0].Name) ||
+                          scanData.Name;
+        }
+        
+        console.log(`[Detail Page] 🔍 Found material name:`, materialName);
+        
+        if (scanData && materialName && !educationalContentShown.current) {
+            console.log(`[Detail Page] 📚 Page loaded with scan data for material: ${materialName}`);
+            educationalContentShown.current = true; // Mark as shown to prevent multiple calls
+            
+            // Add a small delay to ensure the page is fully loaded
+            const timer = setTimeout(() => {
+                console.log(`[Detail Page] 📚 Timer triggered, calling fetchAndShowEducationalContent`);
+                fetchAndShowEducationalContent(materialName);
+            }, 1000);
+            
+            return () => clearTimeout(timer);
+        } else {
+            console.log(`[Detail Page] ❌ Conditions not met for educational content trigger:`);
+            console.log(`  - scanData exists: ${!!scanData}`);
+            console.log(`  - materialName found: ${!!materialName}`);
+            console.log(`  - not already shown: ${!educationalContentShown.current}`);
+        }
+    }, [scanData, fetchAndShowEducationalContent]);
+
+    // Handle image selection for new materials
+    const handleImageSelection = async (imageIndex: number) => {
+        if (!pageData?.material) return;
+        
+        setIsSelectingImage(true);
+        try {
+            if (imageIndex === -1) {
+                // User selected "None Fit" - create material without image
+                console.log(`[Image Selection] Creating material without image: ${pageData.material.Name}`);
+                
+                const response = await fetch(`${API_BASE_URL}/select-material-image`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        material_data: pageData.material,
+                        selected_image_index: -1 // Special value for no image
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('[Image Selection] ✅ Material created successfully without image:', result.material);
+                    
+                    // Update the page data with the created material
+                    setPageData(prev => prev ? {
+                        ...prev,
+                        material: result.material
+                    } : null);
+                    
+                    setShowImageSelection(false);
+                    
+                    // Track quest progress for scanning action
+                    console.log('📸 Tracking scanning action: Material creation');
+                    try {
+                        if (userId) {
+                            const results = await questService.trackScanningAction(userId);
+                            await questService.checkCompletedQuests(results);
+                            console.log('✅ Scanning quest progress updated:', results);
+                        }
+                    } catch (questError) {
+                        console.error('❌ Error tracking scanning quest:', questError);
+                    }
+                    
+                    // Refresh the page to load the new material's details
+                    if (result.material.id) {
+                        await fetchMaterialDetails(result.material.id);
+                    }
+                } else {
+                    console.error('[Image Selection] ❌ Failed to create material:', result.error);
+                    setError(result.error || 'Failed to create material');
+                }
+            } else {
+                // User selected a specific image
+                if (!pageData.material.ImageOptions) return;
+                
+                console.log(`[Image Selection] Selecting image ${imageIndex} for material: ${pageData.material.Name}`);
+                
+                const response = await fetch(`${API_BASE_URL}/select-material-image`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        material_data: pageData.material,
+                        selected_image_index: imageIndex
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('[Image Selection] ✅ Material created successfully:', result.material);
+                    
+                    // Update the page data with the created material
+                    setPageData(prev => prev ? {
+                        ...prev,
+                        material: result.material
+                    } : null);
+                    
+                    setShowImageSelection(false);
+                    
+                    // Track quest progress for scanning action
+                    console.log('📸 Tracking scanning action: Material creation with image');
+                    try {
+                        if (userId) {
+                            const results = await questService.trackScanningAction(userId);
+                            await questService.checkCompletedQuests(results);
+                            console.log('✅ Scanning quest progress updated:', results);
+                        }
+                    } catch (questError) {
+                        console.error('❌ Error tracking scanning quest:', questError);
+                    }
+                    
+                    // Refresh the page to load the new material's details
+                    if (result.material.id) {
+                        await fetchMaterialDetails(result.material.id);
+                    }
+                } else {
+                    console.error('[Image Selection] ❌ Failed to create material:', result.error);
+                    setError(result.error || 'Failed to create material');
+                }
+            }
+        } catch (error) {
+            console.error('[Image Selection] ❌ Error selecting image:', error);
+            setError('Failed to select image');
+        } finally {
+            setIsSelectingImage(false);
+        }
+    };
 
     // Fetch material details and related data from backend
     const fetchMaterialDetails = async (materialId: string) => {
         try {
+            console.log(`[Material Details] Fetching material details for ID: ${materialId}`);
             const response = await fetch(`${API_BASE_URL}/material/${materialId}`);
             if (!response.ok) throw new Error('Failed to fetch material details');
-            return await response.json();
+            const data = await response.json();
+            
+            // Log material data including image information
+            if (data && data.material) {
+                console.log(`[Material Details] Material loaded:`, {
+                    id: data.material.id,
+                    name: data.material.Name,
+                    traits: data.material.Traits,
+                    hasImageUrl: !!data.material.ImageUrl,
+                    imageUrl: data.material.ImageUrl ? 'Present' : 'Missing'
+                });
+                
+                if (data.material.ImageUrl) {
+                    console.log(`[Material Details] Image URL found: ${data.material.ImageUrl}`);
+                } else {
+                    console.log(`[Material Details] No image URL found for material: ${data.material.Name}`);
+                }
+            }
+            
+            return data;
         } catch (error) {
-            console.error('Error fetching material details:', error);
+            console.error('[Material Details] Error fetching material details:', error);
             return null;
         }
     };
@@ -252,17 +516,136 @@ export default function DetailScreen() {
         }
     };
 
-    // Fetch disposal methods for the material
-    const fetchDisposalMethods = async (materialId: string) => {
+    // Fetch disposal methods for the material based on material name and climate
+    const fetchDisposalMethods = async (materialName: string) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/disposal/${materialId}`);
-            if (!response.ok) throw new Error('Failed to fetch disposal methods');
+            console.log(`[Disposal Methods] 🔍 Fetching disposal methods for material: ${materialName}`);
+            
+            // Check if we have stored climate data
+            if (!climateData) {
+                console.log('[Disposal Methods] ⚠️ No stored climate data available, using fallback values');
+                console.log('[Disposal Methods] 💡 Using default tropical climate for disposal method lookup');
+                console.log('[Disposal Methods] 🔍 This could be because:');
+                console.log('  - User just logged in and climate data is still loading');
+                console.log('  - Location permission was not granted');
+                console.log('  - Climate service is unavailable');
+                
+                // Use fallback values for climate data
+                const fallbackClimateData = {
+                    climateZone: 'Tropical',
+                    temperature: { average: 28, unit: 'C' },
+                    humidity: 75
+                };
+                
+                console.log(`[Disposal Methods] 📊 Using fallback climate data:`);
+                console.log(`  Climate Zone: ${fallbackClimateData.climateZone}`);
+                console.log(`  Temperature: ${fallbackClimateData.temperature.average}°${fallbackClimateData.temperature.unit}`);
+                console.log(`  Humidity: ${fallbackClimateData.humidity}%`);
+                console.log(`  Location: ${location ? `${location.latitude},${location.longitude}` : '0,0'}`);
+                
+                const requestBody = {
+                    material_name: materialName,
+                    climate_classification: fallbackClimateData.climateZone,
+                    climate_location: location ? `${location.latitude},${location.longitude}` : '0,0'
+                };
+                
+                console.log(`[Disposal Methods] 📤 Sending fallback request to /disposal/check:`, requestBody);
+                
+                const response = await fetch(`${API_BASE_URL}/disposal/check`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                console.log(`[Disposal Methods] 📥 Fallback response status: ${response.status} ${response.statusText}`);
+                
+                if (!response.ok) {
+                    console.error(`[Disposal Methods] ❌ Fallback HTTP error: ${response.status} ${response.statusText}`);
+                    throw new Error(`Failed to fetch disposal methods: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log(`[Disposal Methods] 📋 Fallback response data:`, data);
+                
+                if (data.found && data.disposal_data) {
+                    console.log(`[Disposal Methods] ✅ Found disposal method with fallback data for ${materialName}`);
+                    // Mark this as fallback data
+                    const disposalDataWithFlag = {
+                        ...data.disposal_data,
+                        isFallbackData: true
+                    };
+                    return disposalDataWithFlag;
+                } else {
+                    console.log(`[Disposal Methods] ❌ No disposal method found with fallback data for ${materialName}`);
+                    return null;
+                }
+            }
+            
+            console.log(`[Disposal Methods] 📊 Using stored climate data:`);
+            console.log(`  Climate Zone: ${climateData.climateZone}`);
+            console.log(`  Temperature: ${climateData.temperature.average}°${climateData.temperature.unit}`);
+            console.log(`  Humidity: ${climateData.humidity}%`);
+            console.log(`  Stored Location: ${storedLocation ? `${storedLocation.latitude},${storedLocation.longitude}` : 'Not available'}`);
+            console.log(`  Data is Fresh: ${isDataFresh ? 'Yes' : 'No'}`);
+            console.log(`  Current Location: ${location ? `${location.latitude},${location.longitude}` : 'Not available'}`);
+            
+            const requestBody = {
+                material_name: materialName,
+                climate_classification: climateData.climateZone,
+                climate_location: storedLocation ? `${storedLocation.latitude},${storedLocation.longitude}` : '0,0'
+            };
+            
+            console.log(`[Disposal Methods] 📤 Sending request to /disposal/check:`, requestBody);
+            
+            const response = await fetch(`${API_BASE_URL}/disposal/check`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody)
+            });
+            
+            console.log(`[Disposal Methods] 📥 Response status: ${response.status} ${response.statusText}`);
+            
+            if (!response.ok) {
+                console.error(`[Disposal Methods] ❌ HTTP error: ${response.status} ${response.statusText}`);
+                throw new Error(`Failed to fetch disposal methods: ${response.status} ${response.statusText}`);
+            }
+            
             const data = await response.json();
-            // Handle both string and object responses
-            return typeof data === 'string' ? data : data.methods || '';
+            console.log(`[Disposal Methods] 📋 Response data:`, data);
+            
+            if (data.found && data.disposal_data) {
+                console.log(`[Disposal Methods] ✅ Found disposal method for ${materialName} using stored climate data (${climateData.climateZone})`);
+                console.log(`[Disposal Methods] 📝 Disposal method details:`);
+                console.log(`  ID: ${data.disposal_data.id}`);
+                console.log(`  Material: ${data.disposal_data.material_name}`);
+                console.log(`  Climate: ${data.disposal_data.climate_classification}`);
+                console.log(`  Location: ${data.disposal_data.climate_location}`);
+                console.log(`  Steps count: ${data.disposal_data.disposal_steps?.length || 0}`);
+                console.log(`  Created: ${data.disposal_data.created_at}`);
+                console.log(`[Disposal Methods] 🏪 Data source: Stored climate data (${isDataFresh ? 'fresh' : 'stale'})`);
+                // Mark this as stored climate data (not fallback)
+                const disposalDataWithFlag = {
+                    ...data.disposal_data,
+                    isFallbackData: false,
+                    isStoredData: true
+                };
+                return disposalDataWithFlag;
+            } else {
+                console.log(`[Disposal Methods] ❌ No disposal method found for ${materialName} using stored climate data (${climateData.climateZone})`);
+                console.log(`[Disposal Methods] 💡 Consider generating new disposal method for this material/climate combination`);
+                return null;
+            }
         } catch (error) {
-            console.error('Error fetching disposal methods:', error);
-            return '';
+            console.error('[Disposal Methods] ❌ Error fetching disposal methods:', error);
+            console.error('[Disposal Methods] 🔍 Error details:', {
+                message: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            return null;
         }
     };
 
@@ -364,18 +747,28 @@ export default function DetailScreen() {
     useEffect(() => {
         const loadPageData = async () => {
             try {
+                console.log('[Detail Page] Starting page data load...');
                 setLoading(true);
                 let materialId: string;
                 let material: MaterialData | null = null;
                 
                 // Handle both scanData (from scanning) and materialId (from navigation)
                 if (params.scanData) {
+                    console.log('[Detail Page] Loading from scan data...');
                     const data = JSON.parse(params.scanData as string);
+                    console.log('[Detail Page] 📊 Parsed scan data:', JSON.stringify(data, null, 2));
                     setScanData(data);
                     
                     if (data['Scanned Material'] && data['Scanned Material'].length > 0) {
                         material = data['Scanned Material'][0];
                         materialId = material?.id || material?.Name || '';
+                        
+                        console.log('[Detail Page] Scan data material:', {
+                            id: material?.id,
+                            name: material?.Name,
+                            hasImageUrl: !!material?.ImageUrl,
+                            imageUrl: material?.ImageUrl ? 'Present' : 'Missing'
+                        });
                         
                         if (!materialId) {
                             throw new Error('No valid material ID found');
@@ -387,18 +780,21 @@ export default function DetailScreen() {
                         throw new Error('No scanned material data found');
                     }
                 } else if (params.materialId) {
+                    console.log('[Detail Page] Loading from material ID:', params.materialId);
                     materialId = params.materialId as string;
                 } else {
                     throw new Error('No material ID or scan data provided');
                 }
                 
+                console.log('[Detail Page] Fetching material details for ID:', materialId);
                 // Fetch material details first to get the material name
                 const materialDetails = await fetchMaterialDetails(materialId);
                 
+                console.log('[Detail Page] Fetching additional data in parallel...');
                 // Fetch remaining data in parallel
                 const [projects, disposalMethods, relatedMaterials] = await Promise.all([
                     fetchRecyclingProjects(materialId, materialDetails?.Name),
-                    fetchDisposalMethods(materialId),
+                    fetchDisposalMethods(materialDetails?.Name || materialId),
                     fetchRelatedMaterials(materialId)
                 ]);
                 
@@ -410,11 +806,31 @@ export default function DetailScreen() {
                     relatedMaterials: relatedMaterials
                 };
                 
+                console.log('[Detail Page] Page data loaded successfully:', {
+                    materialName: pageData.material.Name,
+                    hasImageUrl: !!pageData.material.ImageUrl,
+                    hasImageOptions: !!pageData.material.ImageOptions,
+                    imageOptionsCount: pageData.material.ImageOptions?.length || 0,
+                    projectsCount: pageData.recyclingProjects.length,
+                    relatedMaterialsCount: pageData.relatedMaterials.length
+                });
+                
                 setPageData(pageData);
+                
+                // Check if this is a new material that needs image selection
+                if (pageData.material.ImageOptions && pageData.material.ImageOptions.length > 0) {
+                    console.log('[Detail Page] New material detected with image options, showing selection UI');
+                    setShowImageSelection(true);
+                }
             } catch (error) {
-                console.error('Error loading page data:', error);
+                console.error('[Detail Page] Error loading page data:', error);
+                console.error('[Detail Page] Error details:', {
+                    message: error instanceof Error ? error.message : 'Unknown error',
+                    stack: error instanceof Error ? error.stack : undefined
+                });
                 setError('Failed to load material details');
             } finally {
+                console.log('[Detail Page] Page data loading completed');
                 setLoading(false);
             }
         };
@@ -448,36 +864,126 @@ export default function DetailScreen() {
     }
 
     return (
-        <ScrollView style={[styles.container, { backgroundColor: P.background }]}>
-            {/* Back Button */}
-            <ThemedView style={styles.backButtonContainer}>
-                <TouchableOpacity style={[styles.backButton, { borderRadius: Radii.lg, borderColor: P.border, backgroundColor: P.backgroundSecondary }]} onPress={() => router.back()}>
-                    <ThemedText style={styles.backButtonText}>← Back</ThemedText>
-                </TouchableOpacity>
-            </ThemedView>
+        <ThemedView style={styles.container}>
+            {/* Image Selection Modal */}
+            {showImageSelection && pageData.material.ImageOptions && (
+                <ThemedView style={styles.imageSelectionModal}>
+                    <ThemedView style={styles.imageSelectionContent}>
+                        <ThemedText type="title" style={styles.imageSelectionTitle}>
+                            Choose the best image for "{pageData.material.Name}"
+                        </ThemedText>
+                        <ThemedText style={styles.imageSelectionSubtitle}>
+                            Select the image that best represents this material:
+                        </ThemedText>
+                        
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageOptionsContainer}>
+                            {pageData.material.ImageOptions.map((imageOption, index) => (
+                                <TouchableOpacity
+                                    key={index}
+                                    style={[
+                                        styles.imageOption,
+                                        selectedImageIndex === index && styles.selectedImageOption
+                                    ]}
+                                    onPress={() => setSelectedImageIndex(index)}
+                                >
+                                    <Image
+                                        source={{ uri: imageOption.thumb }}
+                                        style={styles.imageOptionThumb}
+                                        resizeMode="cover"
+                                    />
+                                    <ThemedText style={styles.imageOptionDescription} numberOfLines={2}>
+                                        {imageOption.alt_description || imageOption.description || 'Image'}
+                                    </ThemedText>
+                                    <ThemedText style={styles.imageOptionPhotographer} numberOfLines={1}>
+                                        by {imageOption.photographer}
+                                    </ThemedText>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                        
+                        <ThemedView style={styles.imageSelectionButtons}>
+                            <TouchableOpacity
+                                style={[styles.imageSelectionButton, styles.cancelButton]}
+                                onPress={() => {
+                                    setShowImageSelection(false);
+                                    router.back();
+                                }}
+                            >
+                                <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity
+                                style={[styles.imageSelectionButton, styles.skipButton]}
+                                onPress={() => handleImageSelection(-1)} // -1 indicates no image
+                                disabled={isSelectingImage}
+                            >
+                                <ThemedText style={styles.skipButtonText}>None Fit</ThemedText>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity
+                                style={[styles.imageSelectionButton, styles.confirmButton]}
+                                onPress={() => handleImageSelection(selectedImageIndex)}
+                                disabled={isSelectingImage}
+                            >
+                                {isSelectingImage ? (
+                                    <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                    <ThemedText style={styles.confirmButtonText}>Use This Image</ThemedText>
+                                )}
+                            </TouchableOpacity>
+                        </ThemedView>
+                    </ThemedView>
+                </ThemedView>
+            )}
+            
+            <ScrollView style={styles.scrollContainer}>
+                {/* Back Button */}
+                <ThemedView style={styles.backButtonContainer}>
+                    <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                        <ThemedText style={styles.backButtonText}>← Back</ThemedText>
+                    </TouchableOpacity>
+                </ThemedView>
             
             {/* Top Division */}
-            <ThemedView style={[styles.topDivision, { backgroundColor: P.card, borderRadius: Radii.md, ...(Shadows.soft as any) }]}>
+            <ThemedView style={styles.topDivision}>
                 <ThemedView style={styles.imageBox}>
-                    {pageData.material.imageUrl ? (
+                    {pageData.material.ImageUrl ? (
                         <Image 
-                            source={{ uri: pageData.material.imageUrl }} 
+                            source={{ uri: pageData.material.ImageUrl }} 
                             style={styles.materialImage}
                             resizeMode="cover"
+                            onLoad={() => {
+                                console.log(`[Material Image] Successfully loaded image for ${pageData.material.Name}`);
+                                console.log(`[Material Image] Image URL: ${pageData.material.ImageUrl || 'N/A'}`);
+                            }}
+                            onError={(error) => {
+                                console.error(`[Material Image] Failed to load image for ${pageData.material.Name}:`, error);
+                                console.error(`[Material Image] Failed URL: ${pageData.material.ImageUrl || 'N/A'}`);
+                            }}
                         />
                     ) : (
                         <ThemedText style={styles.placeholderText}>Material Image</ThemedText>
                     )}
                 </ThemedView>
-                <ThemedText type="title" style={[styles.title, { color: P.text }]}>{pageData.material.Name}</ThemedText>
-                <ThemedText style={[styles.traitsText, { color: P.text + '99' }]}>
+                <ThemedText type="title" style={styles.title}>{pageData.material.Name}</ThemedText>
+                <ThemedText style={styles.traitsText}>
                     {pageData.material.Traits.join(', ')}
                 </ThemedText>
+                
+                {/* Educational Content Button */}
+                <TouchableOpacity 
+                    style={styles.educationalButton}
+                    onPress={() => fetchAndShowEducationalContent(pageData.material.Name)}
+                    activeOpacity={0.7}
+                >
+                    <MaterialIcons name="school" size={20} color="#fff" />
+                    <ThemedText style={styles.educationalButtonText}>Learn More</ThemedText>
+                </TouchableOpacity>
             </ThemedView>
 
             {/* Middle Division */}
-            <ThemedView style={[styles.middleDivision, { backgroundColor: P.card, borderRadius: Radii.md, ...(Shadows.soft as any) }]}>
-                <ThemedText type="title" style={[styles.sectionTitle, { color: P.text }]}>Recycling Projects</ThemedText>
+            <ThemedView style={styles.middleDivision}>
+                <ThemedText type="title" style={styles.sectionTitle}>Recycling Projects</ThemedText>
                 
                 {populatingProjects ? (
                     <ThemedView style={styles.populatingContainer}>
@@ -488,7 +994,7 @@ export default function DetailScreen() {
                     pageData.recyclingProjects.map((project, index) => (
                         <TouchableOpacity 
                             key={project.id} 
-                            style={[styles.projectCard, { backgroundColor: P.backgroundSecondary, borderRadius: Radii.md }]}
+                            style={styles.projectCard}
                             onPress={() => navigateToProjectDetail(project.id)}
                             activeOpacity={0.7}
                         >
@@ -504,17 +1010,17 @@ export default function DetailScreen() {
                                 )}
                             </ThemedView>
                             <ThemedView style={styles.projectInfo}>
-                                <ThemedText type="subtitle" style={[styles.projectTitle, { color: P.text }]}>{project.project_name}</ThemedText>
-                                <ThemedText style={[styles.projectDescription, { color: P.text + '99' }]}>
+                                <ThemedText type="subtitle" style={styles.projectTitle}>{project.project_name}</ThemedText>
+                                <ThemedText style={styles.projectDescription}>
                                     Material: {project.material_name}
                                 </ThemedText>
-                                <ThemedText style={[styles.projectTraitsText, { color: P.text + '99' }]}>
+                                <ThemedText style={styles.projectTraitsText}>
                                     Required: {project.required_traits.join(', ')}
                                 </ThemedText>
-                                <ThemedText style={[styles.stepsText, { color: P.text + '80' }]}>
+                                <ThemedText style={styles.stepsText}>
                                     Steps: {project.steps.length} steps
                                 </ThemedText>
-                                <ThemedText style={[styles.tapToViewText, { color: P.primary }]}>
+                                <ThemedText style={styles.tapToViewText}>
                                     Tap to view full details →
                                 </ThemedText>
                             </ThemedView>
@@ -525,26 +1031,26 @@ export default function DetailScreen() {
                 )}
 
                 {/* Generate New Project Section */}
-                <ThemedView style={[styles.generateProjectSection, { backgroundColor: P.backgroundSecondary, borderColor: P.border, borderRadius: Radii.md }]}>
-                    <ThemedText type="subtitle" style={[styles.generateProjectTitle, { color: P.text }]}>
+                <ThemedView style={styles.generateProjectSection}>
+                    <ThemedText type="subtitle" style={styles.generateProjectTitle}>
                         Not satisfied with these projects?
                     </ThemedText>
-                    <ThemedText style={[styles.generateProjectDescription, { color: P.text + '99' }]}>
+                    <ThemedText style={styles.generateProjectDescription}>
                         Generate a new custom project tailored specifically for your material using AI!
                     </ThemedText>
                     {generateError && (
-                        <ThemedText style={[styles.generateErrorText, { color: P.error }]}>
+                        <ThemedText style={styles.generateErrorText}>
                             {generateError}
                         </ThemedText>
                     )}
                     <ThemedView style={styles.generateButtonContainer}>
                         {generatingCustomProject ? (
-                            <ThemedView style={[styles.generateButton, { backgroundColor: P.primary, borderRadius: Radii.lg }]}>
+                            <ThemedView style={styles.generateButton}>
                                 <ActivityIndicator size="small" color="#fff" />
                                 <ThemedText style={styles.generateButtonText}>Generating...</ThemedText>
                             </ThemedView>
                         ) : (
-                            <TouchableOpacity style={[styles.generateButton, { backgroundColor: P.primary, borderRadius: Radii.lg }]} onPress={generateCustomProject}>
+                            <TouchableOpacity style={styles.generateButton} onPress={generateCustomProject}>
                                 <ThemedText style={styles.generateButtonText}>Generate New Project</ThemedText>
                             </TouchableOpacity>
                         )}
@@ -553,20 +1059,189 @@ export default function DetailScreen() {
             </ThemedView>
 
             {/* Bottom Division */}
-            <ThemedView style={[styles.bottomDivision, { backgroundColor: P.card, borderRadius: Radii.md, ...(Shadows.soft as any) }]}>
-                <ThemedText type="title" style={[styles.sectionTitle, { color: P.text }]}>Disposal Methods</ThemedText>
-                <ThemedText style={[styles.disposalText, { color: P.text }]}>
-                    {pageData.disposalMethods || 'No disposal methods available for this material.'}
-                </ThemedText>
+            <ThemedView style={styles.bottomDivision}>
+                <ThemedText type="title" style={styles.sectionTitle}>Disposal Methods</ThemedText>
+                {(() => {
+                    if (pageData.disposalMethods) {
+                        const isFallback = pageData.disposalMethods.isFallbackData;
+                        const isStored = (pageData.disposalMethods as any).isStoredData;
+                        console.log(`[Disposal Methods UI] ✅ Rendering disposal methods for ${pageData.material.Name}`);
+                        console.log(`[Disposal Methods UI] 📊 Displaying ${pageData.disposalMethods.disposal_steps?.length || 0} disposal steps`);
+                        
+                        if (isFallback) {
+                            console.log(`[Disposal Methods UI] ⚠️ Using FALLBACK/DEFAULT climate data`);
+                            console.log(`[Disposal Methods UI] 🌡️ Climate: ${pageData.disposalMethods.climate_classification} (default)`);
+                        } else if (isStored) {
+                            console.log(`[Disposal Methods UI] ✅ Using STORED climate data`);
+                            console.log(`[Disposal Methods UI] 🌡️ Climate: ${pageData.disposalMethods.climate_classification} (stored, ${isDataFresh ? 'fresh' : 'stale'})`);
+                        } else {
+                            console.log(`[Disposal Methods UI] ✅ Using ACTUAL climate data`);
+                            console.log(`[Disposal Methods UI] 🌡️ Climate: ${pageData.disposalMethods.climate_classification} (detected)`);
+                        }
+                        
+                        return (
+                            <ThemedView style={styles.disposalContainer}>
+                                <ThemedView style={styles.disposalHeader}>
+                                    <ThemedText style={styles.disposalClimate}>
+                                        Climate: {pageData.disposalMethods.climate_classification}
+                                    </ThemedText>
+                                </ThemedView>
+                                <ThemedText style={styles.disposalStepsTitle}>Disposal Steps:</ThemedText>
+                                {pageData.disposalMethods.disposal_steps.map((step, index) => {
+                                    console.log(`[Disposal Methods UI] 📝 Rendering step ${index + 1}: ${step.substring(0, 50)}...`);
+                                    return (
+                                        <ThemedView key={index} style={styles.disposalStep}>
+                                            <ThemedText style={styles.disposalStepNumber}>{index + 1}.</ThemedText>
+                                            <ThemedText style={styles.disposalStepText}>{step}</ThemedText>
+                                        </ThemedView>
+                                    );
+                                })}
+                            </ThemedView>
+                        );
+                    } else {
+                        console.log(`[Disposal Methods UI] ❌ No disposal methods available for ${pageData.material.Name}`);
+                        console.log(`[Disposal Methods UI] 💡 This could be because:`);
+                        console.log(`  - No disposal method exists for this material/climate combination`);
+                        console.log(`  - Climate data is not available (${!climateData ? 'MISSING' : 'AVAILABLE'})`);
+                        console.log(`  - Location data is not available (${!location ? 'MISSING' : 'AVAILABLE'})`);
+                        console.log(`[Disposal Methods UI] 🔍 Climate data status: ${climateData ? '✅ Available' : '❌ Missing'}`);
+                        console.log(`[Disposal Methods UI] 📍 Location data status: ${location ? '✅ Available' : '❌ Missing'}`);
+                        
+                        return (
+                            <ThemedText style={styles.disposalText}>
+                                No disposal methods available for this material in your current climate.
+                            </ThemedText>
+                        );
+                    }
+                })()}
             </ThemedView>
-        </ScrollView>
+            </ScrollView>
+            
+            {/* Educational Content Modal */}
+                <EducationalContentModal
+                    visible={educationalModalVisible}
+                    onClose={() => {
+                        setEducationalModalVisible(false);
+                        educationalContentShown.current = false; // Reset for next scan
+                    }}
+                    content={educationalContent}
+                    loading={educationalLoading}
+                    materialName={currentMaterialName}
+                />
+        </ThemedView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f5f5f5',
+    },
+    scrollContainer: {
+        flex: 1,
+    },
+    imageSelectionModal: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        zIndex: 1000,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    imageSelectionContent: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 24,
+        margin: 20,
+        maxHeight: '80%',
+        width: '90%',
+    },
+    imageSelectionTitle: {
+        fontSize: 20,
+        fontWeight: '600',
+        color: '#333',
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    imageSelectionSubtitle: {
+        fontSize: 16,
+        color: '#666',
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    imageOptionsContainer: {
+        marginBottom: 24,
+    },
+    imageOption: {
+        width: 150,
+        marginRight: 16,
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#E5E5E5',
+        backgroundColor: '#F8F9FA',
+    },
+    selectedImageOption: {
+        borderColor: '#007AFF',
+        backgroundColor: '#E3F2FD',
+    },
+    imageOptionThumb: {
+        width: '100%',
+        height: 100,
+        borderRadius: 8,
+        marginBottom: 8,
+    },
+    imageOptionDescription: {
+        fontSize: 12,
+        color: '#333',
+        marginBottom: 4,
+        textAlign: 'center',
+    },
+    imageOptionPhotographer: {
+        fontSize: 10,
+        color: '#666',
+        textAlign: 'center',
+        fontStyle: 'italic',
+    },
+    imageSelectionButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+    imageSelectionButton: {
+        flex: 1,
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    cancelButton: {
+        backgroundColor: '#F8F9FA',
+        borderWidth: 1,
+        borderColor: '#E5E5E5',
+    },
+    skipButton: {
+        backgroundColor: '#FF9500',
+    },
+    confirmButton: {
+        backgroundColor: '#007AFF',
+    },
+    cancelButtonText: {
+        color: '#666',
+        fontSize: 16,
+        fontWeight: '500',
+    },
+    skipButtonText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '500',
+    },
+    confirmButtonText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '500',
     },
     backButtonContainer: {
         paddingHorizontal: 16,
@@ -738,6 +1413,51 @@ const styles = StyleSheet.create({
         lineHeight: 24,
         textAlign: 'justify',
     },
+    disposalContainer: {
+        marginTop: 10,
+    },
+    disposalHeader: {
+        backgroundColor: '#f8f9fa',
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 16,
+        borderLeftWidth: 4,
+        borderLeftColor: '#007AFF',
+    },
+    disposalClimate: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#007AFF',
+        marginBottom: 4,
+    },
+    disposalLocation: {
+        fontSize: 12,
+        color: '#666',
+    },
+    disposalStepsTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 12,
+    },
+    disposalStep: {
+        flexDirection: 'row',
+        marginBottom: 8,
+        paddingLeft: 8,
+    },
+    disposalStepNumber: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#007AFF',
+        width: 24,
+        marginRight: 8,
+    },
+    disposalStepText: {
+        flex: 1,
+        fontSize: 14,
+        color: '#333',
+        lineHeight: 20,
+    },
     generateProjectSection: {
         marginTop: 20,
         padding: 20,
@@ -793,4 +1513,35 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
     },
+    educationalButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#007AFF',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 25,
+        marginTop: 15,
+        shadowColor: '#000',
+        shadowOffset: {
+            width: 0,
+            height: 2,
+        },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5,
+    },
+    educationalButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+        marginLeft: 8,
+    },
 });
+
+export default function DetailScreenWithAuth() {
+    return (
+        <AuthGuard>
+            <DetailScreen />
+        </AuthGuard>
+    );
+}

@@ -1,21 +1,23 @@
 import { Image } from 'expo-image';
-import { StyleSheet, View, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { Pressable } from 'react-native';
 import { useState, useEffect } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { ScrollView as RNScrollView } from 'react-native';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import SettingsSidebar from '@/components/SettingsSidebar';
-import { Radii, Spacing, Shadows } from '@/constants/DesignTokens';
+import { useLocation, LocationData } from '@/hooks/useLocation';
+import { useClimate } from '@/hooks/useClimate';
+import { populateTropicalDisposalTable, getUniqueMaterialsCount, getTropicalDisposalCount } from '@/lib/adminService';
+import { useAuth } from '@/contexts/AuthContext';
+import { questService } from '@/lib/questService';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -57,8 +59,8 @@ interface CurrentProjectData {
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
-  const P = usePalette();
   const params = useLocalSearchParams();
+  const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [userMaterials, setUserMaterials] = useState<MaterialData[]>([]);
   const [userProjects, setUserProjects] = useState<ProjectData[]>([]);
@@ -69,6 +71,13 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('User');
+  const [adminTapCount, setAdminTapCount] = useState(0);
+  
+  // Location functionality (for automatic background location detection)
+  const { location, requestLocation } = useLocation();
+  
+  // Climate functionality (for automatic climate data fetching)
+  const { getClimateForLocation } = useClimate();
 
   // Fetch user's scanned materials
   const fetchUserMaterials = async (userId: string) => {
@@ -85,9 +94,16 @@ export default function HomeScreen() {
   // Fetch material details by ID
   const fetchMaterialDetails = async (materialId: string) => {
     try {
+      console.log(`[Index] Fetching material details for ID: ${materialId}`);
       const response = await fetch(`${API_BASE_URL}/material/${materialId}`);
       if (!response.ok) throw new Error('Failed to fetch material details');
-      return await response.json();
+      const data = await response.json();
+      console.log(`[Index] Material details fetched:`, {
+        id: data.id,
+        name: data.Name,
+        imageUrl: data.ImageUrl
+      });
+      return data;
     } catch (error) {
       console.error('Error fetching material details:', error);
       return null;
@@ -129,6 +145,123 @@ export default function HomeScreen() {
     router.push(`/pages/detail?materialId=${materialId}`);
   };
 
+  // Send location data to backend (for future use)
+  const sendLocationToBackend = async (locationData: LocationData) => {
+    try {
+      if (!userId) return;
+
+      const response = await fetch(`${API_BASE_URL}/user/${userId}/location`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          accuracy: locationData.accuracy,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      if (response.ok) {
+        console.log('Location data sent to backend successfully');
+      } else {
+        console.error('Failed to send location data to backend');
+      }
+    } catch (error) {
+      console.error('Error sending location data:', error);
+    }
+  };
+
+  // Handle automatic location update on login
+  const handleAutomaticLocationUpdate = async () => {
+    try {
+      console.log('🌍 Automatically requesting location on login...');
+      await requestLocation();
+      if (location) {
+        console.log('🌍 Location obtained, sending to backend and getting climate data...');
+        // Send to backend for future location-based features
+        await sendLocationToBackend(location);
+        // Get climate data for the location
+        await getClimateForLocation(location);
+        
+        // Track quest progress for location action
+        console.log('📍 Tracking location action: Share location');
+        try {
+          if (userId) {
+            const results = await questService.trackLocationAction(userId);
+            await questService.checkCompletedQuests(results);
+            console.log('✅ Location quest progress updated:', results);
+          }
+        } catch (questError) {
+          console.error('❌ Error tracking location quest:', questError);
+        }
+      }
+    } catch (error) {
+      console.error('🌍 Error getting location automatically:', error);
+    }
+  };
+
+  // Admin function to populate tropical disposal table
+  const handleAdminFunction = async () => {
+    try {
+      Alert.alert(
+        'Admin Function',
+        'Populate tropical disposal table for all existing materials?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Yes', 
+            onPress: async () => {
+              try {
+                Alert.alert('Processing', 'Populating disposal table... This may take a moment.');
+                
+                const result = await populateTropicalDisposalTable();
+                
+                Alert.alert(
+                  'Population Complete',
+                  `Processed: ${result.results.processed}\n` +
+                  `Successful: ${result.results.successful}\n` +
+                  `Failed: ${result.results.failed}\n` +
+                  `Skipped: ${result.results.skipped}\n` +
+                  `Errors: ${result.results.errors.length}`,
+                  [{ text: 'OK' }]
+                );
+              } catch (error) {
+                Alert.alert('Error', `Failed to populate disposal table: ${error}`);
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Admin function error:', error);
+    }
+  };
+
+  // Handle title tap for admin function
+  const handleTitleTap = () => {
+    const newCount = adminTapCount + 1;
+    setAdminTapCount(newCount);
+    
+    if (newCount >= 5) {
+      setAdminTapCount(0);
+      handleAdminFunction();
+    } else if (newCount >= 3) {
+      // Show hint after 3 taps
+      setTimeout(() => {
+        if (adminTapCount >= 3) {
+          Alert.alert('Admin Mode', `Tap ${5 - newCount} more times to access admin functions`);
+        }
+      }, 1000);
+    }
+    
+    // Reset counter after 5 seconds
+    setTimeout(() => {
+      setAdminTapCount(0);
+    }, 5000);
+  };
+
   // Refresh current project data
   const refreshCurrentProject = async (userId: string) => {
     try {
@@ -159,6 +292,16 @@ export default function HomeScreen() {
       setUserData(defaultProfile);
       setUserName(defaultProfile.name);
       
+      // Track quest progress for profile completion
+      console.log('👤 Tracking profile action: Initialize profile');
+      try {
+        const results = await questService.trackProfileCompletion(userId);
+        await questService.checkCompletedQuests(results);
+        console.log('✅ Profile quest progress updated:', results);
+      } catch (questError) {
+        console.error('❌ Error tracking profile quest:', questError);
+      }
+      
       return defaultProfile;
     } catch (error) {
       console.error('🔧 Error initializing user profile:', error);
@@ -169,7 +312,6 @@ export default function HomeScreen() {
   // Refresh user profile data (name, title, progress)
   const refreshUserProfile = async () => {
     try {
-      const userId = await getUserId();
       if (userId) {
         console.log('🔄 Refreshing user profile data...');
         const [userDataResponse, profileInfo] = await Promise.all([
@@ -297,7 +439,6 @@ export default function HomeScreen() {
     const loadUserData = async () => {
       try {
         setLoading(true);
-        const userId = await getUserId();
         
         if (!userId) {
           setError('No user ID found');
@@ -368,6 +509,9 @@ export default function HomeScreen() {
         // Load profile image
         await loadProfileImage(userId);
         
+        // Automatically request location when user logs in
+        await handleAutomaticLocationUpdate();
+        
         if (userMaterialsData.length > 0) {
           // Fetch details for each material
           const materialDetails = await Promise.all(
@@ -395,18 +539,17 @@ export default function HomeScreen() {
       }
     };
 
-    loadUserData();
-  }, []);
+    if (userId) {
+      loadUserData();
+    }
+  }, [userId]);
 
   // Handle refresh parameter
   useEffect(() => {
     const handleRefresh = async () => {
-      if (params.refresh === 'true') {
+      if (params.refresh === 'true' && userId) {
         try {
-          const userId = await getUserId();
-          if (userId) {
-            await refreshCurrentProject(userId);
-          }
+          await refreshCurrentProject(userId);
         } catch (error) {
           console.error('Error handling refresh:', error);
         }
@@ -414,12 +557,12 @@ export default function HomeScreen() {
     };
 
     handleRefresh();
-  }, [params.refresh]);
+  }, [params.refresh, userId]);
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: P.background }]}>
-        <ActivityIndicator size="large" color={P.icon} />
+      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
+        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
         <ThemedText style={styles.loadingText}>Loading your materials...</ThemedText>
       </View>
     );
@@ -427,7 +570,7 @@ export default function HomeScreen() {
 
   if (error) {
     return (
-      <View style={[styles.errorContainer, { backgroundColor: P.background }]}>
+      <View style={[styles.errorContainer, { backgroundColor: Colors[colorScheme].background }]}>
         <ThemedText style={styles.errorText}>{error}</ThemedText>
       </View>
     );
@@ -440,25 +583,14 @@ export default function HomeScreen() {
         onClose={() => setSidebarVisible(false)} 
       />
       <View
-        style={{ flex: 1, padding: 16, backgroundColor: P.background }}
+        style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
       >
-        <View style={[styles.headerRow, { marginTop: Spacing.lg, marginBottom: Spacing.md }]}>
+        <View style={styles.headerRow}>
           {/* <ThemedView style={styles.titleContainer}>
             <ThemedText type="title">Waste to Worth</ThemedText>
           </ThemedView> */}
           
         </View>
-        {/* Subtle decorative header */}
-        <ThemedView style={{
-          backgroundColor: P.card,
-          borderRadius: Radii.md,
-          padding: Spacing.md,
-          marginBottom: Spacing.md,
-          ...(Shadows.soft as any)
-        }}>
-          <ThemedText type="title">Welcome</ThemedText>
-          <ThemedText style={{ opacity: 0.8 }}>Track your progress and projects</ThemedText>
-        </ThemedView>
         <View style={styles.sectionsContainer}>
           {/* Current Project Section (Top) */}
           {currentProject && currentProject.project_name && (
@@ -468,18 +600,20 @@ export default function HomeScreen() {
                 lightColor={Colors.light.background}
                 darkColor={Colors.dark.background}
               >
-                <ThemedText type="subtitle">Current Project 
-                  <Pressable
-                    style={styles.settingsButton}
-                    onPress={() => setSidebarVisible(true)}
-                    accessibilityLabel="Settings"
-                  >
-                    <MaterialIcons name="settings" size={24} color={P.icon} />
-                  </Pressable>
-                </ThemedText>
+                <Pressable onPress={handleTitleTap}>
+                  <ThemedText type="subtitle">Current Project 
+                    <Pressable
+                      style={styles.settingsButton}
+                      onPress={() => setSidebarVisible(true)}
+                      accessibilityLabel="Settings"
+                    >
+                      <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
+                    </Pressable>
+                  </ThemedText>
+                </Pressable>
                 
                 <TouchableOpacity 
-                  style={[styles.currentProjectCard, { backgroundColor: P.card }]}
+                  style={styles.currentProjectCard}
                   onPress={() => navigateToProjectDetail(currentProject.id)}
                   activeOpacity={0.7}
                 >
@@ -515,14 +649,16 @@ export default function HomeScreen() {
             darkColor={Colors.dark.background}
           >
             <View style={styles.materialsHeader}>
-              <ThemedText type="subtitle">Your Scanned Materials</ThemedText>
+              <Pressable onPress={handleTitleTap}>
+                <ThemedText type="subtitle">Your Scanned Materials</ThemedText>
+              </Pressable>
               {userMaterials.length > 3 && (
                 <Pressable
-                  style={[styles.showMoreButton, { backgroundColor: P.backgroundSecondary, borderRadius: Radii.pill, paddingHorizontal: Spacing.sm, paddingVertical: 6 }]}
+                  style={styles.showMoreButton}
                   onPress={() => router.push('/history')}
                 >
-                  <ThemedText style={[styles.showMoreText, { color: P.text }]}>Show More</ThemedText>
-                  <MaterialIcons name="arrow-forward" size={16} color={P.tint} />
+                  <ThemedText style={styles.showMoreText}>Show More</ThemedText>
+                  <MaterialIcons name="arrow-forward" size={16} color="#007AFF" />
                 </Pressable>
               )}
             </View>
@@ -532,15 +668,19 @@ export default function HomeScreen() {
                 userMaterials.slice(-3).map((material, index) => (
                   <TouchableOpacity 
                     key={material.id} 
-                    style={[styles.materialCard, { backgroundColor: P.card }]}
+                    style={styles.materialCard}
                     onPress={() => navigateToMaterialDetail(material.id)}
                     activeOpacity={0.7}
                   >
-                    <Image
-                      source={material.imageUrl ? { uri: material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
-                      style={styles.materialCardImage}
-                      resizeMode="contain"
-                    />
+                    <View style={styles.materialImageContainer}>
+                      <Image
+                        source={material.imageUrl ? { uri: material.imageUrl } : require('@/assets/images/partial-react-logo.png')}
+                        style={styles.materialCardImage}
+                        resizeMode="contain"
+                        onLoad={() => console.log(`[Index] Image loaded for ${material.Name}`)}
+                        onError={(error) => console.log(`[Index] Image failed to load for ${material.Name}:`, error)}
+                      />
+                    </View>
                     <View style={styles.materialCardContent}>
                       <ThemedText type="defaultSemiBold" style={styles.materialCardTitle}>{material.Name}</ThemedText>
                       <ThemedText style={styles.materialCardDescription}>
@@ -561,8 +701,6 @@ export default function HomeScreen() {
               )}
             </View>
           </ThemedView>
-          {/* Divider Line */}
-          <View style={[styles.divider, { backgroundColor: P.border }]} />
           {/* Profile Section (Bottom) */}
           <ThemedView
             style={[styles.section, { flex: 1, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }]}
@@ -576,7 +714,6 @@ export default function HomeScreen() {
                   <Pressable
                     style={styles.initializeButton}
                     onPress={async () => {
-                      const userId = await getUserId();
                       if (userId) {
                         await initializeUserProfile(userId);
                         await refreshUserProfile();
@@ -586,18 +723,17 @@ export default function HomeScreen() {
                     <MaterialIcons name="add-circle" size={16} color="#007AFF" />
                   </Pressable>
                 )}
-                <MaterialIcons name="refresh" size={16} color={P.icon} />
+                <MaterialIcons name="refresh" size={16} color="#666" />
               </View>
             </View>
             <Pressable 
-              style={[styles.profileCard, { backgroundColor: P.card }]}
+              style={styles.profileCard}
               onPress={refreshUserProfile}
             >
               <View style={styles.profileHeader}>
                 <Pressable 
                   style={styles.profileImageContainer}
                   onPress={async () => {
-                    const userId = await getUserId();
                     if (userId) {
                       await loadProfileImage(userId);
                     }
@@ -608,15 +744,6 @@ export default function HomeScreen() {
                     style={styles.profileImage}
                     resizeMode="cover"
                   />
-                  {profileImageUrl && (
-                    <View style={styles.imageSourceIndicator}>
-                      <MaterialIcons 
-                        name={profileImageUrl.startsWith('http') ? 'cloud-done' : 'phone-android'} 
-                        size={12} 
-                        color="white" 
-                      />
-                    </View>
-                  )}
                 </Pressable>
                 <View style={styles.profileInfo}>
                   <ThemedText type="defaultSemiBold" style={styles.profileName}>
@@ -637,11 +764,11 @@ export default function HomeScreen() {
               </View>
               <View style={styles.progressSection}>
                 <View style={styles.progressBarContainer}>
-                  <View style={[styles.progressBar, { backgroundColor: P.border }]}>
+                  <View style={styles.progressBar}>
                     <View 
                       style={[
                         styles.progressFill, 
-                        { width: `${userData?.progress || 0}%`, backgroundColor: P.primary }
+                        { width: `${userData?.progress || 0}%` }
                       ]} 
                     />
                   </View>
@@ -973,10 +1100,26 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
   },
+  materialImageContainer: {
+    position: 'relative',
+    marginBottom: 8,
+  },
   materialCardImage: {
     width: 60,
     height: 60,
-    marginBottom: 8,
+  },
+  materialImageSourceIndicator: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: 'white',
+    borderRadius: 6,
+    padding: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1,
+    elevation: 2,
   },
   materialCardContent: {
     alignItems: 'center',

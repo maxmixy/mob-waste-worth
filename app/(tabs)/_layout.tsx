@@ -5,10 +5,9 @@ import { Platform } from 'react-native';
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
-import FloatingScanButton from '@/components/ui/FloatingScanButton';
 import { Colors } from '@/constants/Colors';
-import { useThemeVariant, getVariantColor } from '@/hooks/ThemeContext';
-
+import { useColorScheme } from '@/hooks/useColorScheme';
+import { AuthGuard } from '@/components/AuthGuard';
 
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
@@ -17,12 +16,13 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 // This file is the main layout for the tabs in the app.
 
 export default function TabLayout() {
-  const { variant, scheme } = useThemeVariant();
+  const colorScheme = useColorScheme();
 
   return (
-    <Tabs
+    <AuthGuard>
+      <Tabs
       screenOptions={{
-        tabBarActiveTintColor: getVariantColor(variant, (scheme ?? 'light'), 'primary'),
+        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].primary,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
@@ -33,11 +33,11 @@ export default function TabLayout() {
           left: 20,
           right: 20,
           height: 65,
-          backgroundColor: scheme === 'dark' ? 'rgba(31, 41, 55, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          backgroundColor: colorScheme === 'dark' ? 'rgba(31, 41, 55, 0.95)' : 'rgba(255, 255, 255, 0.95)',
           borderRadius: 32.5,
           borderTopWidth: 0,
           borderWidth: 1,
-          borderColor: scheme === 'dark' ? 'rgba(107, 114, 128, 0.2)' : 'rgba(0, 0, 0, 0.1)',
+          borderColor: colorScheme === 'dark' ? 'rgba(107, 114, 128, 0.2)' : 'rgba(0, 0, 0, 0.1)',
           shadowColor: '#000',
           shadowOffset: {
             width: 0,
@@ -68,7 +68,6 @@ export default function TabLayout() {
       <Tabs.Screen
         name="scan"
         options={{
-          tabBarButton: (props) => <FloatingScanButton {...props} />,
           tabBarIcon: ({ color }) => <MaterialCommunityIcons name="cube-scan" size={32} color={color} />,
         }}
       />
@@ -85,5 +84,6 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    </AuthGuard>
   );
 }

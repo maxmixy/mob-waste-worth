@@ -1,38 +1,22 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, TouchableOpacity, TextInput, Text } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { saveUserId, updateEULAAcceptance } from '@/lib/user';
 import EULA from '@/components/EULA';
-
-// 🔥 Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyCxj-RNwupirseU_-mGR7LtsLGA86P_GVM",
-  authDomain: "waste-to-worth-7d5b0.firebaseapp.com",
-  projectId: "waste-to-worth-7d5b0",
-  storageBucket: "waste-to-worth-7d5b0.firebasestorage.app",
-  messagingSenderId: "648267234726",
-  appId: "1:648267234726:web:3e70721145557b2f316367",
-  measurementId: "G-E8563BL8PJ"
-};
-
-// ✅ only initialize Firebase once
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
-const db = getFirestore(app);
+import { useAuth } from '@/contexts/AuthContext';
+import { auth, db } from '@/lib/firebaseConfig';
 
 export default function SignUpPage() {
   const colorScheme = useColorScheme() ?? 'light';
-  const P = usePalette();
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
 
   const [loading, setLoading] = useState(false);
 
@@ -45,6 +29,14 @@ export default function SignUpPage() {
   const [confirmError, setConfirmError] = useState('');
   const [showEULA, setShowEULA] = useState(false);
   const [pendingUserData, setPendingUserData] = useState<{email: string, password: string} | null>(null);
+
+  // Redirect authenticated users to main app
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      console.log('[SignUp] ✅ User already authenticated, redirecting to main app');
+      router.replace('/(tabs)/' as any);
+    }
+  }, [isAuthenticated, isLoading, router]);
 
   const handleSignUp = async () => {
     setLoading(true);
@@ -104,7 +96,7 @@ export default function SignUpPage() {
           console.warn('⚠️ Failed to create user document:', e);
         }
 
-        router.replace('(tabs)');
+        router.replace('/(tabs)/' as any);
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -130,14 +122,32 @@ export default function SignUpPage() {
   // Show EULA if user has completed signup form
   if (showEULA) {
     return (
-      <ThemedView style={{ flex: 1, backgroundColor: P.background }}>
+      <ThemedView style={{ flex: 1, backgroundColor: Colors[colorScheme].background }}>
         <EULA onAccept={handleEULAAccept} onDecline={handleEULADecline} />
       </ThemedView>
     );
   }
 
+  // Show loading while checking authentication
+  if (isLoading) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Checking authentication...</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  // Don't render signup form if user is already authenticated (redirect will happen)
+  if (isAuthenticated) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+        <ThemedText>Redirecting to main app...</ThemedText>
+      </ThemedView>
+    );
+  }
+
   return (
-    <ThemedView style={[styles.container, { backgroundColor: P.background }]}> 
+    <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>
       {/* Logo */}
       <ThemedView style={styles.imageContainer}>
         <Image
@@ -159,42 +169,42 @@ export default function SignUpPage() {
       <ThemedView style={{ width: '100%', maxWidth: 340, marginBottom: 8 }}>
         <ThemedText style={{ marginBottom: 4 }}>Email</ThemedText>
         <TextInput
-          style={[styles.input, { borderColor: P.border, color: P.text, backgroundColor: P.backgroundSecondary }]}
+          style={styles.input}
           autoCapitalize="none"
           keyboardType="email-address"
           value={email}
           onChangeText={(t) => { setEmail(t); setEmailError(''); }}
           placeholder="Enter your email"
-          placeholderTextColor={P.text + '80'}
+          placeholderTextColor="#888"
         />
         {emailError ? <Text style={styles.inlineError}>{emailError}</Text> : null}
 
         <ThemedText style={{ marginBottom: 4 }}>Password</ThemedText>
         <TextInput
-          style={[styles.input, { borderColor: P.border, color: P.text, backgroundColor: P.backgroundSecondary }]}
+          style={styles.input}
           secureTextEntry
           value={password}
           onChangeText={(t) => { setPassword(t); setPasswordError(''); }}
           placeholder="Create a password"
-          placeholderTextColor={P.text + '80'}
+          placeholderTextColor="#888"
         />
         {passwordError ? <Text style={styles.inlineError}>{passwordError}</Text> : null}
 
         <ThemedText style={{ marginBottom: 4 }}>Confirm password</ThemedText>
         <TextInput
-          style={[styles.input, { borderColor: P.border, color: P.text, backgroundColor: P.backgroundSecondary }]}
+          style={styles.input}
           secureTextEntry
           value={confirm}
           onChangeText={(t) => { setConfirm(t); setConfirmError(''); }}
           placeholder="Confirm password"
-          placeholderTextColor={P.text + '80'}
+          placeholderTextColor="#888"
         />
         {confirmError ? <Text style={styles.inlineError}>{confirmError}</Text> : null}
       </ThemedView>
 
       {/* Sign Up button */}
       <TouchableOpacity
-        style={[styles.button, { backgroundColor: P.primary }]}
+        style={[styles.button, styles.signupButton]}
         onPress={handleSignUp}
         disabled={loading}
       >
@@ -205,7 +215,7 @@ export default function SignUpPage() {
 
       {/* Back to login */}
       <TouchableOpacity
-        style={[styles.button, { marginTop: 12, backgroundColor: P.accent }]}
+        style={[styles.button, { marginTop: 12 }]}
         onPress={() => router.replace('/')}
       >
         <ThemedText style={styles.buttonText}>Back to Log in</ThemedText>
@@ -221,8 +231,10 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
+    borderColor: '#ccc',
     marginBottom: 8,
     fontSize: 16,
+    color: '#222',
   },
   title: { marginBottom: 12, fontSize: 28, fontWeight: '700' },
   subtitle: { fontSize: 16, color: '#555', textAlign: 'center', marginBottom: 18, maxWidth: 320 },
@@ -234,7 +246,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  signupButton: { marginTop: 8 },
+  signupButton: { backgroundColor: '#4285F4', marginTop: 8 },
   imageContainer: {
     width: 220, height: 220, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',

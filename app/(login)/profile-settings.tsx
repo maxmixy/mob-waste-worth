@@ -5,9 +5,10 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
+import { questService } from '@/lib/questService';
+import { useAuth } from '@/contexts/AuthContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { Pressable } from 'react-native';
@@ -15,8 +16,8 @@ import * as ImagePicker from 'expo-image-picker';
 
 export default function ProfileSettingsScreen() {
   const colorScheme = useColorScheme() ?? 'light';
-  const P = usePalette();
   const router = useRouter();
+  const { userId: authUserId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [profileData, setProfileData] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -252,6 +253,18 @@ export default function ProfileSettingsScreen() {
         setProfileImageUrl(response.imageUrl);
         Alert.alert('Success', 'Profile image updated successfully!');
         
+        // Track quest progress for profile action
+        console.log('👤 Tracking profile action: Add profile photo');
+        try {
+          if (authUserId) {
+            const results = await questService.trackProfileCompletion(authUserId);
+            await questService.checkCompletedQuests(results);
+            console.log('✅ Profile quest progress updated:', results);
+          }
+        } catch (questError) {
+          console.error('❌ Error tracking profile quest:', questError);
+        }
+        
         // Refresh profile data to ensure we have the latest image from server
         console.log('🔄 Refreshing profile data after successful upload');
         await loadProfileData();
@@ -288,19 +301,19 @@ export default function ProfileSettingsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: P.background }]}>
-        <ActivityIndicator size="large" color={P.icon} />
+      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
+        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
         <ThemedText style={styles.loadingText}>Loading profile...</ThemedText>
       </View>
     );
   }
 
   return (
-    <ThemedView style={[styles.container, { backgroundColor: P.background }]}>
+    <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>
       {/* Header */}
       <ThemedView style={styles.header}>
         <Pressable onPress={handleBack} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={P.icon} />
+          <MaterialIcons name="arrow-back" size={24} color={Colors[colorScheme].text} />
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Profile Settings</ThemedText>
         <View style={styles.placeholder} />
@@ -350,12 +363,12 @@ export default function ProfileSettingsScreen() {
           
           <View style={styles.buttonRow}>
             <Pressable style={styles.editButton} onPress={handleEditProfile}>
-              <MaterialIcons name="edit" size={20} color={P.icon} />
+              <MaterialIcons name="edit" size={20} color={Colors[colorScheme].icon} />
               <ThemedText style={styles.editButtonText}>Edit Profile</ThemedText>
             </Pressable>
             
             <Pressable style={styles.refreshButton} onPress={refreshProfileImage}>
-              <MaterialIcons name="refresh" size={20} color={P.icon} />
+              <MaterialIcons name="refresh" size={20} color={Colors[colorScheme].icon} />
               <ThemedText style={styles.refreshButtonText}>Refresh Image</ThemedText>
             </Pressable>
           </View>
@@ -389,7 +402,13 @@ export default function ProfileSettingsScreen() {
           <View style={styles.infoItem}>
             <ThemedText style={styles.infoLabel}>Location</ThemedText>
             <ThemedText style={styles.infoValue}>
-              {profileData?.location || 'Not set'}
+              {profileData?.location ? 
+                (typeof profileData.location === 'string' ? 
+                  profileData.location : 
+                  `${profileData.location.latitude?.toFixed(4)}, ${profileData.location.longitude?.toFixed(4)}`
+                ) : 
+                'Not set'
+              }
             </ThemedText>
           </View>
 
@@ -426,21 +445,21 @@ export default function ProfileSettingsScreen() {
         {/* Actions */}
         <ThemedView style={styles.actionsSection}>
           <Pressable style={styles.actionButton} onPress={handleEditProfile}>
-            <MaterialIcons name="edit" size={24} color={P.icon} />
+            <MaterialIcons name="edit" size={24} color={Colors[colorScheme].icon} />
             <ThemedText style={styles.actionButtonText}>Edit Profile</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={P.icon} />
+            <MaterialIcons name="chevron-right" size={24} color={Colors[colorScheme].icon} />
           </Pressable>
 
           <Pressable style={styles.actionButton}>
-            <MaterialIcons name="security" size={24} color={P.icon} />
+            <MaterialIcons name="security" size={24} color={Colors[colorScheme].icon} />
             <ThemedText style={styles.actionButtonText}>Privacy & Security</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={P.icon} />
+            <MaterialIcons name="chevron-right" size={24} color={Colors[colorScheme].icon} />
           </Pressable>
 
           <Pressable style={styles.actionButton}>
-            <MaterialIcons name="notifications" size={24} color={P.icon} />
+            <MaterialIcons name="notifications" size={24} color={Colors[colorScheme].icon} />
             <ThemedText style={styles.actionButtonText}>Notification Settings</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={P.icon} />
+            <MaterialIcons name="chevron-right" size={24} color={Colors[colorScheme].icon} />
           </Pressable>
         </ThemedView>
       </ScrollView>
@@ -448,7 +467,7 @@ export default function ProfileSettingsScreen() {
       {/* Custom Action Sheet for Web */}
       {showActionSheet && (
         <View style={styles.actionSheetOverlay}>
-          <View style={[styles.actionSheet, { backgroundColor: P.background }] }>
+          <View style={styles.actionSheet}>
             <ThemedText style={styles.actionSheetTitle}>Select Profile Image</ThemedText>
             <ThemedText style={styles.actionSheetMessage}>
               Choose how you want to select your profile image. The image will be displayed locally and uploaded to the server once the web files are deployed.

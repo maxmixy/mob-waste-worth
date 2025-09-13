@@ -4,7 +4,6 @@ import { Dimensions } from 'react-native';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
 import { getUserId, updateEULAAcceptance, checkProfileCompletion } from '@/lib/user';
 import EULA from '@/components/EULA';
 
@@ -12,7 +11,6 @@ const { height: screenHeight } = Dimensions.get('window');
 
 export default function EULAPage() {
   const colorScheme = useColorScheme() ?? 'light';
-  const P = usePalette();
   const router = useRouter();
 
   const handleAccept = async () => {
@@ -60,7 +58,7 @@ export default function EULAPage() {
   };
 
   return (
-    <ThemedView style={{ flex: 1, backgroundColor: P.background }}>
+    <ThemedView style={{ flex: 1, backgroundColor: Colors[colorScheme].background }}>
       <ThemedView style={{ height: screenHeight * 0.03 }} />
       <EULA onAccept={handleAccept} onDecline={handleDecline} />
     </ThemedView>
