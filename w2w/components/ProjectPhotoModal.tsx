@@ -3,7 +3,6 @@ import { Modal, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'r
 import { ThemedText } from './ThemedText';
 import { ThemedView } from './ThemedView';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import * as ImagePicker from 'expo-image-picker';
 import { projectPhotoService } from '@/lib/projectPhotoService';
 
@@ -25,13 +24,11 @@ export default function ProjectPhotoModal({
     projectName
 }: ProjectPhotoModalProps) {
     const [loading, setLoading] = useState(false);
-    const colorScheme = useColorScheme();
-    const isDark = colorScheme === 'dark';
-
-    const textColor = isDark ? '#ffffff' : '#000000';
-    const backgroundColor = isDark ? '#1a1a1a' : '#ffffff';
-    const cardBackgroundColor = isDark ? '#2a2a2a' : '#f5f5f5';
-    const buttonColor = isDark ? '#007AFF' : '#007AFF';
+    // Always use light theme
+    const textColor = '#000000';
+    const backgroundColor = '#ffffff';
+    const cardBackgroundColor = '#f5f5f5';
+    const buttonColor = '#4CAF50';
 
     const handleTakePhoto = async () => {
         try {

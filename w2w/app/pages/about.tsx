@@ -1,32 +1,48 @@
 import React from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { StyleSheet, ScrollView, TouchableOpacity, Linking, View, Platform, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { AuthGuard } from '@/components/AuthGuard';
+import { Colors } from '@/constants/Colors';
+import { Image } from 'expo-image';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 function AboutScreen() {
     const router = useRouter();
+
+    const handleBack = () => {
+        router.back();
+    };
 
     const handleContactPress = () => {
         Linking.openURL('mailto:morrisonyuriandrei2@gmail.com');
     };
 
     return (
-        <ScrollView style={styles.container}>
-            {/* Back Button */}
-            <ThemedView style={styles.backButtonContainer}>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                    <ThemedText style={styles.backButtonText}>← Back</ThemedText>
-                </TouchableOpacity>
+        <ThemedView style={[styles.container, { backgroundColor: Colors.background }]}>
+            {/* Header */}
+            <ThemedView style={styles.header}>
+                <Pressable onPress={handleBack} style={styles.backButton}>
+                    <MaterialIcons name="arrow-back" size={24} color={Colors.text} />
+                </Pressable>
+                <ThemedText type="title" style={styles.headerTitle}>About</ThemedText>
+                <View style={styles.placeholder} />
             </ThemedView>
 
-            {/* Header */}
-            <ThemedView style={styles.headerSection}>
-                <ThemedText type="title" style={styles.appTitle}>Waste to Worth</ThemedText>
-                <ThemedText style={styles.tagline}>Transforming waste into valuable resources</ThemedText>
-                <ThemedText style={styles.version}>Version 1.0.0</ThemedText>
-            </ThemedView>
+            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+
+                {/* App Header with Logo */}
+                <ThemedView style={styles.headerSection}>
+                    <Image
+                        source={require('@/assets/images/logo animation 3.png')}
+                        style={styles.logo}
+                        resizeMode="contain"
+                    />
+                    <ThemedText type="title" style={styles.appTitle}>Waste to Worth</ThemedText>
+                    <ThemedText style={styles.tagline}>Transforming waste into valuable resources</ThemedText>
+                    <ThemedText style={styles.version}>Version 1.0.0</ThemedText>
+                </ThemedView>
 
             {/* Mission Section */}
             <ThemedView style={styles.section}>
@@ -127,7 +143,6 @@ function AboutScreen() {
                 <TouchableOpacity style={styles.contactButton} onPress={handleContactPress}>
                     <ThemedText style={styles.contactButtonText}>📧 Contact Support</ThemedText>
                 </TouchableOpacity>
-
             </ThemedView>
 
             {/* Footer */}
@@ -139,87 +154,92 @@ function AboutScreen() {
                     Made with ❤️ for a sustainable future
                 </ThemedText>
             </ThemedView>
-        </ScrollView>
+            </ScrollView>
+        </ThemedView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f5f5f5',
     },
-    backButtonContainer: {
-        paddingHorizontal: 16,
-        paddingTop: 16,
-        paddingBottom: 8,
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingTop: 50,
+        paddingBottom: 20,
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+        borderBottomWidth: 1,
+        borderBottomColor: '#00630F',
+        ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
     },
     backButton: {
-        alignSelf: 'flex-start',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        backgroundColor: '#f0f0f0',
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#ddd',
+        padding: 8,
     },
-    backButtonText: {
-        color: '#007AFF',
-        fontSize: 16,
-        fontWeight: '500',
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    placeholder: {
+        width: 40,
+    },
+    content: {
+        flex: 1,
+        padding: 20,
     },
     headerSection: {
-        backgroundColor: '#fff',
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
         padding: 24,
-        marginHorizontal: 16,
-        marginBottom: 16,
-        borderRadius: 12,
+        marginBottom: 20,
+        borderRadius: 16,
         alignItems: 'center',
         shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 8,
+        elevation: 4,
+        ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
+    },
+    logo: {
+        width: 120,
+        height: 120,
+        marginBottom: 16,
     },
     appTitle: {
         fontSize: 28,
         fontWeight: 'bold',
-        color: '#2c3e50',
+        color: '#00630F',
         marginBottom: 8,
     },
     tagline: {
         fontSize: 16,
-        color: '#7f8c8d',
+        color: '#666',
         textAlign: 'center',
         marginBottom: 8,
         fontStyle: 'italic',
     },
     version: {
         fontSize: 14,
-        color: '#95a5a6',
+        color: '#888',
         fontWeight: '500',
     },
     section: {
-        backgroundColor: '#fff',
+        backgroundColor: '#FFFFFF',
         padding: 20,
-        marginHorizontal: 16,
-        marginBottom: 16,
-        borderRadius: 12,
+        marginBottom: 20,
+        borderRadius: 16,
         shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 8,
+        elevation: 4,
     },
     sectionTitle: {
         fontSize: 20,
         fontWeight: 'bold',
-        color: '#2c3e50',
+        color: '#00630F',
         marginBottom: 16,
     },
     sectionText: {
@@ -261,10 +281,10 @@ const styles = StyleSheet.create({
         marginLeft: 16,
     },
     contactButton: {
-        backgroundColor: '#3498db',
+        backgroundColor: '#00630F',
         paddingVertical: 12,
         paddingHorizontal: 20,
-        borderRadius: 8,
+        borderRadius: 20,
         marginBottom: 12,
         alignItems: 'center',
     },
@@ -286,15 +306,14 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     footerSection: {
-        backgroundColor: '#34495e',
+        backgroundColor: '#00630F',
         padding: 20,
-        marginHorizontal: 16,
         marginBottom: 32,
-        borderRadius: 12,
+        borderRadius: 16,
         alignItems: 'center',
     },
     footerText: {
-        color: '#ecf0f1',
+        color: '#FFFFFF',
         fontSize: 14,
         textAlign: 'center',
         marginBottom: 4,

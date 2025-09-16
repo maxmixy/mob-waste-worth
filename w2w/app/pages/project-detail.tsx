@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, View, Platform, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { ThemedText } from '@/components/ThemedText';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { getUserId } from '@/lib/user';
 import { AuthGuard } from '@/components/AuthGuard';
 import { questService } from '@/lib/questService';
 import { useAuth } from '@/contexts/AuthContext';
 import ProjectPhotoModal from '@/components/ProjectPhotoModal';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+
+import { Colors } from '@/constants/Colors';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -47,6 +51,10 @@ function ProjectDetailScreen() {
     const params = useLocalSearchParams();
     const router = useRouter();
     const { userId } = useAuth();
+
+    const handleBack = () => {
+        router.back();
+    };
     const [project, setProject] = useState<RecyclingProject | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -160,6 +168,20 @@ function ProjectDetailScreen() {
                 const updatedProgress = await response.json();
                 console.log('Progress updated successfully:', updatedProgress);
                 setProgress(updatedProgress);
+                
+                // Track quest progress for individual step completion
+                if (isCompleted) {
+                    console.log('📋 Tracking step completion action: Complete project step');
+                    try {
+                        if (userId) {
+                            const results = await questService.trackRecyclingProjectAction(userId);
+                            await questService.checkCompletedQuests(results);
+                            console.log('✅ Step completion quest progress updated:', results);
+                        }
+                    } catch (questError) {
+                        console.error('❌ Error tracking step completion quest:', questError);
+                    }
+                }
                 
                 // Check if project is completed and show celebration
                 if (updatedProgress.isCompleted && !progress?.isCompleted) {
@@ -334,8 +356,7 @@ function ProjectDetailScreen() {
     if (loading) {
         return (
             <ThemedView style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <ThemedText style={styles.loadingText}>Loading project details...</ThemedText>
+                <LogoLoadingAnimation size={120} showBackground={true} />
             </ThemedView>
         );
     }
@@ -351,13 +372,21 @@ function ProjectDetailScreen() {
     }
 
     return (
-        <>
-        <ScrollView style={styles.container}>
-            {/* Project Image Section */}
-            <ThemedView style={styles.imageSection}>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                    <ThemedText style={styles.backButtonText}>← Back</ThemedText>
-                </TouchableOpacity>
+        <ThemedView style={[styles.container, { backgroundColor: Colors.background }]}>
+            {/* Header */}
+            <ThemedView style={styles.header}>
+                <Pressable onPress={handleBack} style={styles.backButton}>
+                    <MaterialIcons name="arrow-back" size={24} color={Colors.text} />
+                </Pressable>
+                <ThemedText type="title" style={styles.headerTitle}>
+                    {project?.project_name || 'Project Details'}
+                </ThemedText>
+                <View style={styles.placeholder} />
+            </ThemedView>
+
+            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+                {/* Project Image Section */}
+                <ThemedView style={styles.imageSection}>
                 
                 <ThemedView style={styles.projectImageContainer}>
                     {project.project_image ? (
@@ -572,9 +601,9 @@ function ProjectDetailScreen() {
 
             {/* Bottom Spacing */}
             <ThemedView style={styles.bottomSpacing} />
-        </ScrollView>
+            </ScrollView>
 
-        {/* Completion Celebration Modal */}
+            {/* Completion Celebration Modal */}
         {showCompletionCelebration && (
             <ThemedView style={styles.celebrationOverlay}>
                 <ThemedView style={styles.celebrationModal}>
@@ -625,14 +654,39 @@ function ProjectDetailScreen() {
                 userId={userId || ''}
                 projectName={project?.project_name || ''}
             />
-        </>
+        </ThemedView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f5f5f5',
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingTop: 50,
+        paddingBottom: 20,
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+        borderBottomWidth: 1,
+        borderBottomColor: '#00630F',
+        ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
+    },
+    backButton: {
+        padding: 8,
+    },
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    placeholder: {
+        width: 40,
+    },
+    content: {
+        flex: 1,
+        padding: 20,
     },
     loadingContainer: {
         flex: 1,
@@ -659,23 +713,17 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     imageSection: {
-        backgroundColor: '#fff',
-        padding: 16,
-        marginBottom: 8,
-        alignItems: 'center',
-    },
-    backButton: {
-        alignSelf: 'flex-start',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        backgroundColor: '#f0f0f0',
-        borderRadius: 8,
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+        padding: 20,
         marginBottom: 20,
-    },
-    backButtonText: {
-        color: '#007AFF',
-        fontSize: 16,
-        fontWeight: '500',
+        alignItems: 'center',
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+        ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
     },
     projectImageContainer: {
         width: 250,
@@ -708,46 +756,56 @@ const styles = StyleSheet.create({
         color: '#666',
     },
     projectTitle: {
-        fontSize: 24,
+        fontSize: 28,
         fontWeight: 'bold',
-        color: '#333',
+        color: '#00630F',
         textAlign: 'center',
         marginBottom: 8,
+        lineHeight: 34,
     },
     materialName: {
         fontSize: 16,
-        color: '#666',
+        color: '#4A9B5C',
         textAlign: 'center',
+        fontWeight: '600',
+        marginBottom: 4,
     },
     section: {
-        backgroundColor: '#fff',
-        padding: 16,
-        marginBottom: 8,
+        backgroundColor: '#FFFFFF',
+        padding: 20,
+        marginBottom: 20,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
     },
     sectionTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#333',
-        marginBottom: 12,
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#00630F',
+        marginBottom: 16,
+        lineHeight: 24,
     },
     traitsContainer: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 6,
-        marginBottom: 8,
+        gap: 8,
+        marginBottom: 12,
     },
     traitChip: {
-        backgroundColor: '#e3f2fd',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 12,
+        backgroundColor: '#E8F5E8',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#bbdefb',
+        borderColor: '#4A9B5C',
     },
     traitText: {
-        fontSize: 12,
-        color: '#1976d2',
-        fontWeight: '500',
+        fontSize: 13,
+        color: '#00630F',
+        fontWeight: '600',
     },
     stepsContainer: {
         gap: 16,
@@ -756,37 +814,44 @@ const styles = StyleSheet.create({
     stepItem: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        gap: 12,
-        marginBottom: 12,
-        minHeight: 50,
+        gap: 16,
+        marginBottom: 16,
+        minHeight: 60,
+        paddingVertical: 8,
     },
     stepNumber: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#007AFF',
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#00630F',
         justifyContent: 'center',
         alignItems: 'center',
         flexShrink: 0,
         marginTop: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 3,
     },
     stepNumberText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 16,
         fontWeight: 'bold',
     },
     stepContent: {
         flex: 1,
-        paddingTop: 4,
-        paddingRight: 12,
-        paddingBottom: 4,
+        paddingTop: 6,
+        paddingRight: 8,
+        paddingBottom: 6,
     },
     stepText: {
-        fontSize: 15,
-        color: '#333',
-        lineHeight: 22,
+        fontSize: 16,
+        color: '#2D5016',
+        lineHeight: 24,
         flexWrap: 'wrap',
         flexShrink: 1,
+        fontWeight: '500',
     },
     infoContainer: {
         gap: 12,
@@ -816,25 +881,22 @@ const styles = StyleSheet.create({
         height: 20,
     },
     setCurrentProjectButton: {
-        backgroundColor: '#28a745',
+        backgroundColor: '#00630F',
         paddingVertical: 16,
         paddingHorizontal: 24,
-        borderRadius: 12,
+        borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
+        elevation: 5,
     },
     setCurrentProjectButtonText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: 'bold',
     },
     currentProjectIndicator: {
         backgroundColor: '#e8f5e8',
@@ -914,26 +976,36 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     completeButton: {
-        backgroundColor: '#28a745',
+        backgroundColor: '#00630F',
         paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 6,
+        paddingVertical: 10,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 3,
     },
     completeButtonText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 14,
-        fontWeight: '500',
+        fontWeight: 'bold',
     },
     undoButton: {
-        backgroundColor: '#6c757d',
+        backgroundColor: '#8BC34A',
         paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 6,
+        paddingVertical: 10,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 3,
     },
     undoButtonText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 14,
-        fontWeight: '500',
+        fontWeight: 'bold',
     },
     // Celebration modal styles
     celebrationOverlay: {
@@ -998,29 +1070,39 @@ const styles = StyleSheet.create({
     },
     shareButton: {
         flex: 1,
-        backgroundColor: '#28a745',
-        paddingVertical: 12,
+        backgroundColor: '#00630F',
+        paddingVertical: 14,
         paddingHorizontal: 20,
-        borderRadius: 8,
+        borderRadius: 20,
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
+        elevation: 5,
     },
     shareButtonText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: 'bold',
     },
     dismissButton: {
         flex: 1,
-        backgroundColor: '#6c757d',
-        paddingVertical: 12,
+        backgroundColor: '#4A9B5C',
+        paddingVertical: 14,
         paddingHorizontal: 20,
-        borderRadius: 8,
+        borderRadius: 20,
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
+        elevation: 5,
     },
     dismissButtonText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: 'bold',
     },
     projectPhotoSection: {
         marginTop: 20,
