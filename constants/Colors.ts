@@ -1,67 +1,72 @@
 /**
- * User-friendly color palette designed for accessibility and modern UI/UX
- * Colors follow WCAG guidelines for contrast and readability
+ * Light theme color palette based on the Kupa app design
+ * Colors are optimized for modern food delivery app UI/UX
+ * Consistent light theme only - no dark mode
  */
 
-// Primary brand colors - Earthy, environmental theme
-const primaryGreen = '#2D5016';      // Deep forest green
-const primaryGreenLight = '#4A7C59'; // Lighter forest green
-const accentGreen = '#6B8E23';       // Olive green accent
+// Primary brand colors - Modern green theme from design
+const primaryGreen = '#00630F';      // Main green from login/signup
+const primaryGreenDark = '#004A0B';  // Darker shade for buttons
+const primaryGreenLight = '#4A9B5C'; // Lighter shade for accents
+const accentGreen = '#8BC34A';       // Light green accent
 
 // Neutral colors for text and backgrounds
-const textDark = '#1A1A1A';          // Near black for high contrast
-const textLight = '#E7F1EA';         // Soft off-white for dark mode
-const textSecondary = '#6B7280';     // Medium gray for secondary text
-const textMuted = '#9CA3AF';         // Light gray for muted text
+const textDark = '#212121';          // Dark gray for main text
+const textSecondary = '#757575';     // Medium gray for secondary text  
+const textMuted = '#BDBDBD';         // Light gray for muted text
+const textWhite = '#FFFFFF';         // Pure white
 
-// Background colors
-const backgroundLight = '#FFFFFF';   // Pure white
-const backgroundLightSecondary = '#F9FAFB'; // Very light gray
-// Deep green-charcoal palette for dark mode to match plant UI
-const backgroundDark = '#0F1712';    // Deep evergreen charcoal
-const backgroundDarkSecondary = '#162118'; // Slightly lighter evergreen
+// Background colors - Light theme only
+const backgroundPrimary = '#FFFFFF';    // Pure white main background
+const backgroundSecondary = '#F5F5F5';  // Very light gray secondary
+const backgroundCard = '#FFFFFF';       // White card background
 
 // Status colors
-const success = '#10B981';           // Green for success states
-const warning = '#F59E0B';           // Amber for warnings
-const error = '#EF4444';             // Red for errors
-const info = '#3B82F6';              // Blue for info
+const success = '#00630F';           // Green for success states (matches primary)
+const warning = '#FF9800';           // Orange for warnings  
+const error = '#F44336';             // Red for errors
+const info = '#2196F3';              // Blue for info
 
 export const Colors = {
+  // Main theme colors (always light)
+  text: textDark,
+  textSecondary: textSecondary,
+  textMuted: textMuted,
+  textWhite: textWhite,
+  background: backgroundPrimary,
+  backgroundSecondary: backgroundSecondary,
+  backgroundCard: backgroundCard,
+  tint: primaryGreen,
+  icon: textSecondary,
+  tabIconDefault: textMuted,
+  tabIconSelected: primaryGreen,
+  border: '#E0E0E0',
+  success: success,
+  warning: warning,
+  error: error,
+  info: info,
+  primary: primaryGreen,
+  primaryDark: primaryGreenDark,
+  primaryLight: primaryGreenLight,
+  accent: accentGreen,
+  
+  // Legacy support for components that still reference light/dark
   light: {
     text: textDark,
-    background: backgroundLight,
-    backgroundSecondary: backgroundLightSecondary,
+    background: backgroundPrimary,
+    backgroundSecondary: backgroundSecondary,
     tint: primaryGreen,
     icon: textSecondary,
     tabIconDefault: textMuted,
     tabIconSelected: primaryGreen,
-    border: '#E5E7EB',
-    card: backgroundLight,
+    border: '#E0E0E0',
+    card: backgroundCard,
     success: success,
     warning: warning,
     error: error,
     info: info,
     primary: primaryGreen,
     primaryLight: primaryGreenLight,
-    accent: accentGreen,
-  },
-  dark: {
-    text: textLight,
-    background: backgroundDark,
-    backgroundSecondary: backgroundDarkSecondary,
-    tint: accentGreen,
-    icon: '#9BAAA0',
-    tabIconDefault: '#7F8C85',
-    tabIconSelected: accentGreen,
-    border: '#263229',
-    card: '#1A241D',
-    success: success,
-    warning: warning,
-    error: error,
-    info: info,
-    primary: '#66BB6A',
-    primaryLight: '#81C784',
     accent: accentGreen,
   },
 };

@@ -1,22 +1,20 @@
 /**
- * Learn more about light and dark modes:
- * https://docs.expo.dev/guides/color-schemes/
+ * Fixed light theme color hook
+ * Always returns light theme colors regardless of system preference
  */
 
 import { Colors } from '@/constants/Colors';
-import { getVariantColor, useThemeVariant } from '@/hooks/ThemeContext';
 
 export function useThemeColor(
   props: { light?: string; dark?: string },
-  colorName: keyof typeof Colors.light & keyof typeof Colors.dark
+  colorName: keyof typeof Colors.light
 ) {
-  const { variant, scheme } = useThemeVariant();
-  const theme = scheme ?? 'light';
-  const colorFromProps = props[theme];
+  // Always use light theme
+  const colorFromProps = props.light;
 
   if (colorFromProps) {
     return colorFromProps;
   } else {
-    return getVariantColor(variant, theme, colorName);
+    return Colors.light[colorName];
   }
 }
