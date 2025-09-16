@@ -1,19 +1,22 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, ScrollView, Image, TextInput, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, ScrollView, Image, TextInput, ActivityIndicator, TouchableOpacity, View, Platform, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { getUserId } from '@/lib/user';
 import { useLocation } from '@/hooks/useLocation';
 import { useClimateStorage } from '@/hooks/useClimateStorage';
-import { AuthGuard } from '@/components/AuthGuard';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { questService } from '@/lib/questService';
 import { useAuth } from '@/contexts/AuthContext';
+import { AuthGuard } from '@/components/AuthGuard';
 import EducationalContentModal from '@/components/EducationalContentModal';
 import { educationalService, EducationalContent } from '@/lib/educationalService';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
+import { Colors } from '@/constants/Colors';
 const LOG_URL = 'http://127.0.0.1:5000/log';
+
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Types for the data structure
@@ -24,7 +27,6 @@ interface ImageOption {
     description: string;
     photographer: string;
     photographer_url: string;
-    unsplash_url: string;
 }
 
 interface MaterialData {
@@ -68,6 +70,10 @@ function DetailScreen() {
     const params = useLocalSearchParams();
     const router = useRouter();
     const { userId } = useAuth();
+
+    const handleBack = () => {
+        router.back();
+    };
     const [pageData, setPageData] = useState<DetailPageData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -841,8 +847,7 @@ function DetailScreen() {
     if (loading) {
         return (
             <ThemedView style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <ThemedText style={styles.loadingText}>Loading material details...</ThemedText>
+                <LogoLoadingAnimation size={120} showBackground={true} />
             </ThemedView>
         );
     }
@@ -864,7 +869,18 @@ function DetailScreen() {
     }
 
     return (
-        <ThemedView style={styles.container}>
+        <ThemedView style={[styles.container, { backgroundColor: Colors.background }]}>
+            {/* Header */}
+            <ThemedView style={styles.header}>
+                <Pressable onPress={handleBack} style={styles.backButton}>
+                    <MaterialIcons name="arrow-back" size={24} color={Colors.text} />
+                </Pressable>
+                <ThemedText type="title" style={styles.headerTitle}>
+                    {pageData?.material?.Name || 'Material Details'}
+                </ThemedText>
+                <View style={styles.placeholder} />
+            </ThemedView>
+
             {/* Image Selection Modal */}
             {showImageSelection && pageData.material.ImageOptions && (
                 <ThemedView style={styles.imageSelectionModal}>
@@ -936,15 +952,8 @@ function DetailScreen() {
                 </ThemedView>
             )}
             
-            <ScrollView style={styles.scrollContainer}>
-                {/* Back Button */}
-                <ThemedView style={styles.backButtonContainer}>
-                    <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                        <ThemedText style={styles.backButtonText}>← Back</ThemedText>
-                    </TouchableOpacity>
-                </ThemedView>
-            
-            {/* Top Division */}
+            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+                {/* Top Division */}
             <ThemedView style={styles.topDivision}>
                 <ThemedView style={styles.imageBox}>
                     {pageData.material.ImageUrl ? (
@@ -1020,9 +1029,12 @@ function DetailScreen() {
                                 <ThemedText style={styles.stepsText}>
                                     Steps: {project.steps.length} steps
                                 </ThemedText>
-                                <ThemedText style={styles.tapToViewText}>
-                                    Tap to view full details →
-                                </ThemedText>
+                                <View style={styles.tapToViewContainer}>
+                                    <ThemedText style={styles.tapToViewText}>
+                                        Tap to view details
+                                    </ThemedText>
+                                    <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                                </View>
                             </ThemedView>
                         </TouchableOpacity>
                     ))
@@ -1086,7 +1098,6 @@ function DetailScreen() {
                                         Climate: {pageData.disposalMethods.climate_classification}
                                     </ThemedText>
                                 </ThemedView>
-                                <ThemedText style={styles.disposalStepsTitle}>Disposal Steps:</ThemedText>
                                 {pageData.disposalMethods.disposal_steps.map((step, index) => {
                                     console.log(`[Disposal Methods UI] 📝 Rendering step ${index + 1}: ${step.substring(0, 50)}...`);
                                     return (
@@ -1136,8 +1147,31 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    scrollContainer: {
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingTop: 50,
+        paddingBottom: 20,
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+        borderBottomWidth: 1,
+        borderBottomColor: '#00630F',
+        ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
+    },
+    backButton: {
+        padding: 8,
+    },
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    placeholder: {
+        width: 40,
+    },
+    content: {
         flex: 1,
+        padding: 20,
     },
     imageSelectionModal: {
         position: 'absolute',
@@ -1243,25 +1277,6 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '500',
     },
-    backButtonContainer: {
-        paddingHorizontal: 16,
-        paddingTop: 16,
-        paddingBottom: 8,
-    },
-    backButton: {
-        alignSelf: 'flex-start',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        backgroundColor: '#f0f0f0',
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#ddd',
-    },
-    backButtonText: {
-        color: '#007AFF',
-        fontSize: 16,
-        fontWeight: '500',
-    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -1287,9 +1302,16 @@ const styles = StyleSheet.create({
     },
     topDivision: {
         padding: 20,
-        backgroundColor: '#fff',
-        marginBottom: 10,
+        backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+        marginBottom: 20,
         alignItems: 'center',
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+        ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
     },
     imageBox: {
         width: 200,
@@ -1312,30 +1334,52 @@ const styles = StyleSheet.create({
     title: {
         marginBottom: 15,
         textAlign: 'center',
+        fontSize: 28,
+        fontWeight: 'bold',
+        color: '#00630F',
+        lineHeight: 34,
     },
     traitsText: {
         fontSize: 16,
-        color: '#666',
+        color: '#4A9B5C',
         textAlign: 'center',
-        lineHeight: 22,
+        lineHeight: 24,
         paddingHorizontal: 20,
+        fontWeight: '600',
     },
     middleDivision: {
         padding: 20,
-        backgroundColor: '#fff',
-        marginBottom: 10,
+        backgroundColor: '#FFFFFF',
+        marginBottom: 20,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
     },
     sectionTitle: {
         marginBottom: 20,
         textAlign: 'center',
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#00630F',
+        lineHeight: 24,
     },
     projectCard: {
         flexDirection: 'row',
-        backgroundColor: '#f8f8f8',
-        borderRadius: 12,
-        padding: 15,
-        marginBottom: 15,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 16,
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: '#E8F5E8',
     },
     projectImage: {
         width: 80,
@@ -1355,14 +1399,18 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     projectTitle: {
-        marginBottom: 5,
+        marginBottom: 8,
         fontWeight: 'bold',
+        fontSize: 18,
+        color: '#00630F',
+        lineHeight: 22,
     },
     projectDescription: {
-        fontSize: 14,
-        color: '#666',
-        lineHeight: 20,
-        marginBottom: 5,
+        fontSize: 15,
+        color: '#2D5016',
+        lineHeight: 22,
+        marginBottom: 8,
+        fontWeight: '500',
     },
     difficultyText: {
         fontSize: 12,
@@ -1379,11 +1427,21 @@ const styles = StyleSheet.create({
         color: '#888',
         fontStyle: 'italic',
     },
+    tapToViewContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 8,
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+        backgroundColor: 'rgba(0, 122, 255, 0.1)',
+        borderRadius: 12,
+        gap: 4,
+    },
     tapToViewText: {
         fontSize: 12,
         color: '#007AFF',
-        marginTop: 8,
-        fontWeight: '500',
+        fontWeight: '600',
     },
     noProjectsText: {
         textAlign: 'center',
@@ -1404,14 +1462,21 @@ const styles = StyleSheet.create({
     },
     bottomDivision: {
         padding: 20,
-        backgroundColor: '#fff',
+        backgroundColor: '#FFFFFF',
         marginBottom: 20,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
     },
     disposalText: {
         fontSize: 16,
-        color: '#333',
+        color: '#2D5016',
         lineHeight: 24,
         textAlign: 'justify',
+        fontWeight: '500',
     },
     disposalContainer: {
         marginTop: 10,
@@ -1434,12 +1499,6 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#666',
     },
-    disposalStepsTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#333',
-        marginBottom: 12,
-    },
     disposalStep: {
         flexDirection: 'row',
         marginBottom: 8,
@@ -1454,9 +1513,10 @@ const styles = StyleSheet.create({
     },
     disposalStepText: {
         flex: 1,
-        fontSize: 14,
-        color: '#333',
-        lineHeight: 20,
+        fontSize: 15,
+        color: '#2D5016',
+        lineHeight: 22,
+        fontWeight: '500',
     },
     generateProjectSection: {
         marginTop: 20,
@@ -1491,49 +1551,43 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     generateButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: '#00630F',
         paddingHorizontal: 24,
-        paddingVertical: 12,
-        borderRadius: 8,
+        paddingVertical: 14,
+        borderRadius: 20,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         minWidth: 200,
         shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 3.84,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
         elevation: 5,
     },
     generateButtonText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: 'bold',
     },
     educationalButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#007AFF',
+        backgroundColor: '#00630F',
         paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 25,
-        marginTop: 15,
+        paddingVertical: 14,
+        borderRadius: 20,
+        marginTop: 16,
         shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2,
-        },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
         elevation: 5,
     },
     educationalButtonText: {
-        color: '#fff',
+        color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: 'bold',
         marginLeft: 8,
     },
 });

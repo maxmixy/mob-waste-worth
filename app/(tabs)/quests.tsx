@@ -1,17 +1,28 @@
 import { Image } from 'expo-image';
-import { Platform, StyleSheet, View, Pressable, ActivityIndicator, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import { Platform, StyleSheet, View, Pressable, ActivityIndicator, Alert, Dimensions } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
 import { ScrollView as RNScrollView, ScrollView } from 'react-native';
 import { Colors } from '@/constants/Colors';
-import { ThemedText } from '@/components/ThemedText';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { ThemedView } from '@/components/ThemedView';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { ThemedText } from '@/components/ThemedText';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import SettingsSidebar from '@/components/SettingsSidebar';
 import { useAuth } from '@/contexts/AuthContext';
 import { questService } from '@/lib/questService';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
+import Animated, { 
+  useAnimatedGestureHandler, 
+  useAnimatedStyle, 
+  useSharedValue, 
+  withSpring, 
+  runOnJS,
+  interpolate,
+  Extrapolate
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -39,7 +50,6 @@ interface UserStats {
 }
 
 export default function QuestsScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
   const { userId } = useAuth(); // Get userId from auth context
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -54,6 +64,13 @@ export default function QuestsScreen() {
   });
   const [quests, setQuests] = useState<Quest[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  
+  // Swipe gesture state
+  const scrollViewRef = useRef<ScrollView>(null);
+  const categoryScrollX = useSharedValue(0);
+  const categoryContainerWidth = useSharedValue(0);
+  const categoryItemWidth = useSharedValue(0);
+  const screenWidth = Dimensions.get('window').width;
 
   // Fetch quests from backend API
   const fetchQuests = async (): Promise<Quest[]> => {
@@ -163,11 +180,99 @@ export default function QuestsScreen() {
     { id: 'profile', name: 'Profile', icon: 'person' }
   ];
 
+  // Calculate category item width and container width
+  const calculateCategoryDimensions = () => {
+    const itemWidth = 120; // Approximate width of each category button
+    const containerWidth = categories.length * itemWidth;
+    categoryItemWidth.value = itemWidth;
+    categoryContainerWidth.value = containerWidth;
+  };
+
+  // Handle category selection with haptic feedback
+  const handleCategorySelection = (categoryId: string) => {
+    if (categoryId !== selectedCategory) {
+      setSelectedCategory(categoryId);
+      
+      // Haptic feedback
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      
+      // Auto-scroll to center the selected category
+      const selectedIndex = categories.findIndex(cat => cat.id === categoryId);
+      if (selectedIndex !== -1 && scrollViewRef.current) {
+        // Calculate scroll position to center the selected category
+        const itemWidth = 120; // Should match snapToInterval
+        const containerPadding = 8; // Horizontal padding
+        const scrollToX = Math.max(0, (selectedIndex * itemWidth) - (screenWidth / 2) + (itemWidth / 2) + containerPadding);
+        
+        scrollViewRef.current.scrollTo({ 
+          x: scrollToX, 
+          animated: true 
+        });
+      }
+    }
+  };
+
+  // Pan gesture handler for swipe functionality
+  const panGestureHandler = useAnimatedGestureHandler({
+    onStart: (_, context: any) => {
+      context.startX = categoryScrollX.value;
+    },
+    onActive: (event, context: any) => {
+      categoryScrollX.value = context.startX - event.translationX;
+    },
+    onEnd: (event) => {
+      const velocity = event.velocityX;
+      const translation = event.translationX;
+      
+      // Determine which category to select based on swipe direction and velocity
+      const currentIndex = categories.findIndex(cat => cat.id === selectedCategory);
+      let newIndex = currentIndex;
+      
+      if (Math.abs(translation) > 50 || Math.abs(velocity) > 500) {
+        if (translation > 0 && velocity > 0) {
+          // Swipe right - go to previous category
+          newIndex = Math.max(0, currentIndex - 1);
+        } else if (translation < 0 && velocity < 0) {
+          // Swipe left - go to next category
+          newIndex = Math.min(categories.length - 1, currentIndex + 1);
+        }
+      }
+      
+      // Update selected category if changed
+      if (newIndex !== currentIndex) {
+        runOnJS(handleCategorySelection)(categories[newIndex].id);
+      }
+      
+      // Reset scroll position
+      categoryScrollX.value = withSpring(0);
+    },
+  });
+
+  // Animated style for category container
+  const categoryAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateX: categoryScrollX.value }],
+    };
+  });
+
   useEffect(() => {
     if (userId) {
       loadUserData();
     }
   }, [userId]);
+
+  useEffect(() => {
+    calculateCategoryDimensions();
+  }, []);
+
+  // Recalculate stats whenever quests data changes
+  useEffect(() => {
+    if (quests.length > 0) {
+      recalculateUserStats();
+    }
+  }, [quests]);
 
   const loadUserData = async () => {
     try {
@@ -204,7 +309,30 @@ export default function QuestsScreen() {
         });
 
         setQuests(questsWithProgress);
-        setUserStats(userStatsData);
+        
+        // Calculate level progress based on completed quests and points
+        const completedQuestsCount = questsWithProgress.filter(quest => quest.is_completed).length;
+        const totalQuestsCount = questsWithProgress.length;
+        
+        // Calculate total points from completed quests
+        const totalPointsFromQuests = questsWithProgress
+          .filter(quest => quest.is_completed)
+          .reduce((sum, quest) => sum + quest.points, 0);
+        
+        // Use the higher of backend points or calculated points from quests
+        const actualTotalPoints = Math.max(userStatsData.totalPoints, totalPointsFromQuests);
+        
+        // Use points-based level calculation for more accurate progress
+        const levelInfo = calculateLevelProgressFromPoints(actualTotalPoints);
+        
+        setUserStats({
+          ...userStatsData,
+          totalPoints: actualTotalPoints,
+          level: levelInfo.level,
+          levelProgress: levelInfo.progress,
+          completedQuests: completedQuestsCount,
+          totalQuests: totalQuestsCount
+        });
       } else {
         // If no user ID, just load quests without progress
         const questsData = await fetchQuests();
@@ -225,6 +353,35 @@ export default function QuestsScreen() {
     if (points < 500) return 'Eco Champion';
     if (points < 750) return 'Eco Master';
     return 'Eco Legend';
+  };
+
+  // Calculate level progress based on completed quests
+  const calculateLevelProgress = (completedQuests: number, totalQuests: number): number => {
+    if (totalQuests === 0) return 0;
+    return Math.min((completedQuests / totalQuests) * 100, 100);
+  };
+
+  // Calculate level progress based on points
+  const calculateLevelProgressFromPoints = (points: number): { level: string; progress: number } => {
+    const levelThresholds = [
+      { level: 'Eco Beginner', min: 0, max: 49 },
+      { level: 'Eco Explorer', min: 50, max: 149 },
+      { level: 'Eco Warrior', min: 150, max: 299 },
+      { level: 'Eco Champion', min: 300, max: 499 },
+      { level: 'Eco Master', min: 500, max: 749 },
+      { level: 'Eco Legend', min: 750, max: Infinity }
+    ];
+
+    for (const threshold of levelThresholds) {
+      if (points >= threshold.min && points <= threshold.max) {
+        const progressInLevel = points - threshold.min;
+        const levelRange = threshold.max - threshold.min;
+        const progress = levelRange > 0 ? (progressInLevel / levelRange) * 100 : 100;
+        return { level: threshold.level, progress: Math.min(progress, 100) };
+      }
+    }
+
+    return { level: 'Eco Legend', progress: 100 };
   };
 
   const getFilteredQuests = () => {
@@ -296,11 +453,33 @@ export default function QuestsScreen() {
     }
   };
 
+  // Recalculate user stats based on current quest data
+  const recalculateUserStats = () => {
+    const completedQuestsCount = quests.filter(quest => quest.is_completed).length;
+    const totalQuestsCount = quests.length;
+    
+    // Calculate total points from completed quests
+    const totalPointsFromQuests = quests
+      .filter(quest => quest.is_completed)
+      .reduce((sum, quest) => sum + quest.points, 0);
+    
+    // Use points-based level calculation
+    const levelInfo = calculateLevelProgressFromPoints(totalPointsFromQuests);
+    
+    setUserStats(prevStats => ({
+      ...prevStats,
+      totalPoints: totalPointsFromQuests,
+      level: levelInfo.level,
+      levelProgress: levelInfo.progress,
+      completedQuests: completedQuestsCount,
+      totalQuests: totalQuestsCount
+    }));
+  };
+
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
-        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
-        <ThemedText style={styles.loadingText}>Loading quests...</ThemedText>
+      <View style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
+        <LogoLoadingAnimation size={120} showBackground={true} />
       </View>
     );
   }
@@ -312,7 +491,7 @@ export default function QuestsScreen() {
         onClose={() => setSidebarVisible(false)} 
       />
       <RNScrollView
-        style={{ flex: 1, backgroundColor: Colors[colorScheme].background }}
+        style={{ flex: 1, backgroundColor: Colors.background }}
         contentContainerStyle={{ flexGrow: 1 }}
       >
         {/* Header */}
@@ -326,14 +505,14 @@ export default function QuestsScreen() {
               onPress={refreshQuests}
               accessibilityLabel="Refresh Quests"
             >
-              <MaterialIcons name="refresh" size={24} color={Colors[colorScheme].icon} />
+              <MaterialIcons name="refresh" size={24} color={Colors.icon} />
             </Pressable>
             <Pressable
               style={styles.settingsButton}
               onPress={() => setSidebarVisible(true)}
               accessibilityLabel="Settings"
             >
-              <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
+              <MaterialIcons name="settings" size={24} color={Colors.icon} />
             </Pressable>
           </View>
         </View>
@@ -388,105 +567,58 @@ export default function QuestsScreen() {
             <View style={styles.progressBarBackground}>
               <View style={[styles.progressBarFill, { width: `${userStats.levelProgress}%` }]} />
             </View>
-            <ThemedText style={styles.levelProgressPercent}>{Math.round(userStats.levelProgress)}%</ThemedText>
+            <View style={styles.progressInfo}>
+              <ThemedText style={styles.levelProgressPercent}>{Math.round(userStats.levelProgress)}%</ThemedText>
+              <ThemedText style={styles.levelProgressDetails}>
+                {userStats.completedQuests}/{userStats.totalQuests} quests completed
+              </ThemedText>
+            </View>
           </View>
         </ThemedView>
 
-        {/* Test Quest Actions */}
-        {userId && (
-          <ThemedView style={styles.testActionsContainer}>
-            <ThemedText type="subtitle" style={styles.testActionsTitle}>Test Quest Actions</ThemedText>
-            <ThemedText style={styles.debugInfo}>User ID: {userId}</ThemedText>
-            <View style={styles.testActionsGrid}>
-              <Pressable
-                style={[styles.testActionButton, { backgroundColor: '#4caf50' }]}
-                onPress={async () => {
-                  const results = await questService.trackScanningAction(userId);
-                  await questService.checkCompletedQuests(results);
-                  await refreshQuests();
-                }}
-              >
-                <MaterialIcons name="camera-alt" size={20} color="white" />
-                <ThemedText style={styles.testActionText}>Scan Item</ThemedText>
-              </Pressable>
-              
-              <Pressable
-                style={[styles.testActionButton, { backgroundColor: '#2196f3' }]}
-                onPress={async () => {
-                  const results = await questService.trackProfileCompletion(userId);
-                  await questService.checkCompletedQuests(results);
-                  await refreshQuests();
-                }}
-              >
-                <MaterialIcons name="person" size={20} color="white" />
-                <ThemedText style={styles.testActionText}>Complete Profile</ThemedText>
-              </Pressable>
-              
-              <Pressable
-                style={[styles.testActionButton, { backgroundColor: '#ff9800' }]}
-                onPress={async () => {
-                  const results = await questService.trackRecyclingProjectAction(userId);
-                  await questService.checkCompletedQuests(results);
-                  await refreshQuests();
-                }}
-              >
-                <MaterialIcons name="recycling" size={20} color="white" />
-                <ThemedText style={styles.testActionText}>Recycling Project</ThemedText>
-              </Pressable>
-              
-              <Pressable
-                style={[styles.testActionButton, { backgroundColor: '#9c27b0' }]}
-                onPress={async () => {
-                  const results = await questService.trackCommunityAction(userId);
-                  await questService.checkCompletedQuests(results);
-                  await refreshQuests();
-                }}
-              >
-                <MaterialIcons name="people" size={20} color="white" />
-                <ThemedText style={styles.testActionText}>Community Action</ThemedText>
-              </Pressable>
-              
-              <Pressable
-                style={[styles.testActionButton, { backgroundColor: '#4caf50' }]}
-                onPress={async () => {
-                  const results = await questService.trackLocationAction(userId);
-                  await questService.checkCompletedQuests(results);
-                  await refreshQuests();
-                }}
-              >
-                <MaterialIcons name="place" size={20} color="white" />
-                <ThemedText style={styles.testActionText}>Location Action</ThemedText>
-              </Pressable>
-            </View>
-          </ThemedView>
-        )}
-
-        {/* Category Filter */}
+        {/* Category Filter with Swipe Support */}
         <View style={styles.categoryContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-            {categories.map((category) => (
-              <Pressable
-                key={category.id}
-                style={[
-                  styles.categoryButton,
-                  selectedCategory === category.id && styles.categoryButtonActive
-                ]}
-                onPress={() => setSelectedCategory(category.id)}
+          <PanGestureHandler onGestureEvent={panGestureHandler}>
+            <Animated.View style={styles.categoryScrollContainer}>
+              <ScrollView 
+                ref={scrollViewRef}
+                horizontal 
+                showsHorizontalScrollIndicator={false} 
+                style={styles.categoryScroll}
+                contentContainerStyle={styles.categoryScrollContent}
+                decelerationRate="fast"
+                snapToInterval={120}
+                snapToAlignment="center"
               >
-                <MaterialIcons 
-                  name={category.icon as any} 
-                  size={20} 
-                  color={selectedCategory === category.id ? 'white' : Colors[colorScheme].icon} 
-                />
-                <ThemedText style={[
-                  styles.categoryButtonText,
-                  selectedCategory === category.id && styles.categoryButtonTextActive
-                ]}>
-                  {category.name}
-                </ThemedText>
-              </Pressable>
-            ))}
-          </ScrollView>
+                {categories.map((category, index) => {
+                  const isActive = selectedCategory === category.id;
+
+                  return (
+                    <Pressable
+                      key={category.id}
+                      style={[
+                        styles.categoryButton,
+                        isActive && styles.categoryButtonActive
+                      ]}
+                      onPress={() => handleCategorySelection(category.id)}
+                    >
+                      <MaterialIcons 
+                        name={category.icon as any} 
+                        size={20} 
+                        color={isActive ? 'white' : Colors.icon} 
+                      />
+                      <ThemedText style={[
+                        styles.categoryButtonText,
+                        isActive && styles.categoryButtonTextActive
+                      ]}>
+                        {category.name}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Animated.View>
+          </PanGestureHandler>
         </View>
 
         {/* Quests List */}
@@ -509,7 +641,7 @@ export default function QuestsScreen() {
                   <MaterialIcons 
                     name={quest.icon as any} 
                     size={24} 
-                    color={quest.is_completed ? '#4caf50' : Colors[colorScheme].icon} 
+                    color={quest.is_completed ? '#4caf50' : Colors.icon} 
                   />
                 </View>
                 <View style={styles.questInfo}>
@@ -605,12 +737,16 @@ const styles = StyleSheet.create({
   statsContainer: {
     margin: 16,
     padding: 20,
-    borderRadius: 12,
+    borderRadius: 16,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderWidth: 1,
+    borderColor: '#00630F',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   userInfo: {
     flexDirection: 'row',
@@ -644,10 +780,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 4,
+    color: '#2D5016',
   },
   userLevel: {
     fontSize: 16,
-    color: '#666',
+    color: '#4A6741',
   },
   statsGrid: {
     flexDirection: 'row',
@@ -660,11 +797,11 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#4caf50',
+    color: Colors.primary,
   },
   statLabel: {
     fontSize: 14,
-    color: '#666',
+    color: '#4A6741',
     marginTop: 4,
   },
   levelProgressContainer: {
@@ -672,7 +809,7 @@ const styles = StyleSheet.create({
   },
   levelProgressText: {
     fontSize: 14,
-    color: '#666',
+    color: '#4A6741',
     marginBottom: 8,
   },
   progressBarBackground: {
@@ -684,77 +821,64 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#4caf50',
+    backgroundColor: Colors.primary,
     borderRadius: 4,
   },
   levelProgressPercent: {
     fontSize: 12,
     color: '#666',
-    textAlign: 'right',
-    marginTop: 4,
-  },
-  testActionsContainer: {
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  testActionsTitle: {
-    fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 8,
-    textAlign: 'center',
   },
-  debugInfo: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 12,
-    textAlign: 'center',
-    fontFamily: 'monospace',
+  levelProgressDetails: {
+    fontSize: 11,
+    color: '#888',
+    fontStyle: 'italic',
   },
-  testActionsGrid: {
+  progressInfo: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 8,
-  },
-  testActionButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minWidth: '48%',
-    gap: 6,
-  },
-  testActionText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
+    marginTop: 4,
   },
   categoryContainer: {
     marginHorizontal: 16,
     marginBottom: 16,
+    overflow: 'hidden',
+  },
+  categoryScrollContainer: {
+    flex: 1,
   },
   categoryScroll: {
     flexDirection: 'row',
+  },
+  categoryScrollContent: {
+    paddingHorizontal: 8,
+    alignItems: 'center',
   },
   categoryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    marginRight: 8,
+    marginHorizontal: 4,
     borderRadius: 20,
     backgroundColor: '#f0f0f0',
+    minWidth: 100,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   categoryButtonActive: {
-    backgroundColor: '#4caf50',
+    backgroundColor: Colors.primary,
+    transform: [{ scale: 1.05 }],
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   categoryButtonText: {
     marginLeft: 6,
@@ -763,16 +887,21 @@ const styles = StyleSheet.create({
   },
   categoryButtonTextActive: {
     color: 'white',
+    fontWeight: '600',
   },
   questsContainer: {
     margin: 16,
-    padding: 16,
-    borderRadius: 12,
+    padding: 20,
+    borderRadius: 16,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderWidth: 1,
+    borderColor: '#00630F',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   questsTitle: {
     fontSize: 18,
@@ -833,7 +962,7 @@ const styles = StyleSheet.create({
   questPointsText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#4caf50',
+    color: Colors.primary,
   },
   questPointsCompleted: {
     color: '#2e7d32',
@@ -845,18 +974,13 @@ const styles = StyleSheet.create({
   questProgress: {
     marginTop: 8,
   },
-  progressInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
   progressText: {
     fontSize: 12,
     color: '#666',
   },
   progressPercent: {
     fontSize: 12,
-    color: '#4caf50',
+    color: Colors.primary,
     fontWeight: 'bold',
   },
   questProgressBar: {
@@ -868,7 +992,7 @@ const styles = StyleSheet.create({
   },
   questProgressFill: {
     height: '100%',
-    backgroundColor: '#4caf50',
+    backgroundColor: Colors.primary,
     borderRadius: 3,
   },
   completedBadge: {

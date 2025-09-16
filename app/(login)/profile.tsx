@@ -1,17 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView } from 'react-native';
+import { StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, View, Platform, Pressable } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { getUserId, updateUserProfile } from '@/lib/user';
+import { getUserId, updateUserProfile, checkProfileCompletion } from '@/lib/user';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 export default function ProfileCreationPage() {
-  const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [age, setAge] = useState('');
@@ -21,7 +22,38 @@ export default function ProfileCreationPage() {
   const [lastNameError, setLastNameError] = useState('');
   const [ageError, setAgeError] = useState('');
 
-  const handleCreateProfile = async () => {
+  // Load existing profile data when component mounts
+  useEffect(() => {
+    loadExistingProfile();
+  }, []);
+
+  const loadExistingProfile = async () => {
+    try {
+      setLoadingData(true);
+      const userId = await getUserId();
+      if (userId) {
+        const profileInfo = await checkProfileCompletion(userId);
+        if (profileInfo.profileCompleted && profileInfo.profileData) {
+          const data = profileInfo.profileData;
+          setFirstName(data.firstName || '');
+          setLastName(data.lastName || '');
+          setAge(data.age ? data.age.toString() : '');
+          setLocation(data.location || '');
+          setInterests(data.interests || '');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading existing profile:', error);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  const handleBack = () => {
+    router.back();
+  };
+
+  const handleUpdateProfile = async () => {
     setLoading(true);
     setFirstNameError('');
     setLastNameError('');
@@ -54,21 +86,33 @@ export default function ProfileCreationPage() {
     try {
       const userId = await getUserId();
       if (userId) {
+        // Randomly select one of the 3 guest profile SVGs
+        const guestProfiles = [
+          'guest profile 1.svg',
+          'guest profile 2.svg', 
+          'guest profile 3.svg'
+        ];
+        const randomProfileIndex = Math.floor(Math.random() * guestProfiles.length);
+        const defaultProfilePic = guestProfiles[randomProfileIndex];
+        
         const profileData = {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           age: ageNum,
           location: location.trim(),
           interests: interests.trim(),
+          profilePicture: defaultProfilePic,
           profileCompleted: true,
           profileCreatedAt: new Date().toISOString()
         };
 
         const success = await updateUserProfile(userId, profileData);
         if (success) {
-          router.replace('/(tabs)');
+          Alert.alert('Success', 'Profile updated successfully!', [
+            { text: 'OK', onPress: () => router.back() }
+          ]);
         } else {
-          Alert.alert('Error', 'Failed to create profile. Please try again.');
+          Alert.alert('Error', 'Failed to update profile. Please try again.');
         }
       } else {
         Alert.alert('Error', 'User not found. Please log in again.');
@@ -82,15 +126,37 @@ export default function ProfileCreationPage() {
     }
   };
 
+  if (loadingData) {
+    return (
+      <ThemedView style={[styles.container, { backgroundColor: Colors.background }]}>
+        <ThemedView style={styles.header}>
+          <Pressable onPress={handleBack} style={styles.backButton}>
+            <MaterialIcons name="arrow-back" size={24} color={Colors.text} />
+          </Pressable>
+          <ThemedText type="title" style={styles.headerTitle}>Edit Profile</ThemedText>
+          <View style={styles.placeholder} />
+        </ThemedView>
+        <View style={styles.loadingContainer}>
+          <LogoLoadingAnimation size={100} showBackground={false} />
+        </View>
+      </ThemedView>
+    );
+  }
+
   return (
-    <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <ThemedText type="title" style={styles.title}>
-          Create Your Profile
-        </ThemedText>
-        
+    <ThemedView style={[styles.container, { backgroundColor: Colors.background }]}>
+      {/* Header */}
+      <ThemedView style={styles.header}>
+        <Pressable onPress={handleBack} style={styles.backButton}>
+          <MaterialIcons name="arrow-back" size={24} color={Colors.text} />
+        </Pressable>
+        <ThemedText type="title" style={styles.headerTitle}>Edit Profile</ThemedText>
+        <View style={styles.placeholder} />
+      </ThemedView>
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <ThemedText type="subtitle" style={styles.subtitle}>
-          Help us personalize your recycling experience
+          Update your profile information
         </ThemedText>
 
         <ThemedView style={styles.formContainer}>
@@ -98,18 +164,18 @@ export default function ProfileCreationPage() {
           <ThemedView style={styles.inputGroup}>
             <ThemedText style={styles.label}>First Name *</ThemedText>
             <TextInput
-              style={[
-                styles.input,
-                { 
-                  backgroundColor: Colors[colorScheme].background,
-                  borderColor: firstNameError ? '#f44336' : Colors[colorScheme].text + '20',
-                  color: Colors[colorScheme].text
-                }
-              ]}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: Colors.background,
+                    borderColor: firstNameError ? '#f44336' : Colors.text + '20',
+                    color: Colors.text
+                  }
+                ]}
               value={firstName}
               onChangeText={setFirstName}
               placeholder="Enter your first name"
-              placeholderTextColor={Colors[colorScheme].text + '60'}
+              placeholderTextColor={Colors.text + '60'}
               autoCapitalize="words"
             />
             {firstNameError ? <ThemedText style={styles.errorText}>{firstNameError}</ThemedText> : null}
@@ -122,15 +188,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.input,
                 { 
-                  backgroundColor: Colors[colorScheme].background,
-                  borderColor: lastNameError ? '#f44336' : Colors[colorScheme].text + '20',
-                  color: Colors[colorScheme].text
+                    backgroundColor: Colors.background,
+                    borderColor: lastNameError ? '#f44336' : Colors.text + '20',
+                    color: Colors.text
                 }
               ]}
               value={lastName}
               onChangeText={setLastName}
               placeholder="Enter your last name"
-              placeholderTextColor={Colors[colorScheme].text + '60'}
+              placeholderTextColor={Colors.text + '60'}
               autoCapitalize="words"
             />
             {lastNameError ? <ThemedText style={styles.errorText}>{lastNameError}</ThemedText> : null}
@@ -143,15 +209,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.input,
                 { 
-                  backgroundColor: Colors[colorScheme].background,
-                  borderColor: ageError ? '#f44336' : Colors[colorScheme].text + '20',
-                  color: Colors[colorScheme].text
+                    backgroundColor: Colors.background,
+                    borderColor: ageError ? '#f44336' : Colors.text + '20',
+                    color: Colors.text
                 }
               ]}
               value={age}
               onChangeText={setAge}
               placeholder="Enter your age"
-              placeholderTextColor={Colors[colorScheme].text + '60'}
+              placeholderTextColor={Colors.text + '60'}
               keyboardType="numeric"
               maxLength={3}
             />
@@ -165,15 +231,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.input,
                 { 
-                  backgroundColor: Colors[colorScheme].background,
-                  borderColor: Colors[colorScheme].text + '20',
-                  color: Colors[colorScheme].text
+                    backgroundColor: Colors.background,
+                    borderColor: Colors.text + '20',
+                    color: Colors.text
                 }
               ]}
               value={location}
               onChangeText={setLocation}
               placeholder="City, Country"
-              placeholderTextColor={Colors[colorScheme].text + '60'}
+              placeholderTextColor={Colors.text + '60'}
               autoCapitalize="words"
             />
           </ThemedView>
@@ -185,15 +251,15 @@ export default function ProfileCreationPage() {
               style={[
                 styles.textArea,
                 { 
-                  backgroundColor: Colors[colorScheme].background,
-                  borderColor: Colors[colorScheme].text + '20',
-                  color: Colors[colorScheme].text
+                    backgroundColor: Colors.background,
+                    borderColor: Colors.text + '20',
+                    color: Colors.text
                 }
               ]}
               value={interests}
               onChangeText={setInterests}
               placeholder="e.g., Recycling, Sustainability, Zero Waste, Gardening..."
-              placeholderTextColor={Colors[colorScheme].text + '60'}
+              placeholderTextColor={Colors.text + '60'}
               multiline
               numberOfLines={3}
               textAlignVertical="top"
@@ -208,11 +274,11 @@ export default function ProfileCreationPage() {
               styles.createButton,
               loading && styles.buttonDisabled
             ]}
-            onPress={handleCreateProfile}
+            onPress={handleUpdateProfile}
             disabled={loading}
           >
             <ThemedText style={[styles.buttonText, styles.createButtonText]}>
-              {loading ? 'Creating Profile...' : 'Create Profile'}
+              {loading ? 'Updating Profile...' : 'Update Profile'}
             </ThemedText>
           </TouchableOpacity>
         </ThemedView>
@@ -224,16 +290,41 @@ export default function ProfileCreationPage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
   },
-  scrollView: {
+  loadingContainer: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  title: {
-    textAlign: 'center',
-    marginBottom: 8,
-    fontSize: 28,
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 20,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderBottomWidth: 1,
+    borderBottomColor: '#00630F',
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 20,
     fontWeight: 'bold',
+  },
+  placeholder: {
+    width: 40,
+  },
+  content: {
+    flex: 1,
+    padding: 20,
   },
   subtitle: {
     textAlign: 'center',
@@ -242,7 +333,16 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   formContainer: {
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 16,
+    padding: 20,
     marginBottom: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   inputGroup: {
     marginBottom: 20,
@@ -277,11 +377,12 @@ const styles = StyleSheet.create({
   button: {
     paddingVertical: 15,
     paddingHorizontal: 20,
-    borderRadius: 8,
+    borderRadius: 20,
     alignItems: 'center',
+    backgroundColor: '#00630F',
   },
   createButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#00630F',
   },
   buttonDisabled: {
     opacity: 0.6,

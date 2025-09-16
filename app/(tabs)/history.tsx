@@ -1,12 +1,12 @@
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View, TouchableOpacity, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 
-import { ThemedText } from '@/components/ThemedText';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { ThemedView } from '@/components/ThemedView';
+import { ThemedText } from '@/components/ThemedText';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId } from '@/lib/user';
 import { questService } from '@/lib/questService';
 import { useAuth } from '@/contexts/AuthContext';
@@ -40,7 +40,6 @@ interface ScanHistoryItem {
 }
 
 export default function HistoryScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
   const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -169,16 +168,15 @@ export default function HistoryScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
-        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
-        <ThemedText style={styles.loadingText}>Loading scan history...</ThemedText>
+      <View style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
+        <LogoLoadingAnimation size={120} showBackground={true} />
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={[styles.errorContainer, { backgroundColor: Colors[colorScheme].background }]}>
+      <View style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
         <ThemedText style={styles.errorText}>{error}</ThemedText>
       </View>
     );
@@ -191,29 +189,37 @@ export default function HistoryScreen() {
         onClose={() => setSidebarVisible(false)} 
       />
       <RNScrollView
-        style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
-        contentContainerStyle={{ flexGrow: 1 }}
+        style={{ flex: 1, backgroundColor: Colors.background }}
+        contentContainerStyle={{ padding: 16 }}
+        showsVerticalScrollIndicator={false}
+        bounces={true}
       >
+        {/* Header */}
         <View style={styles.headerRow}>
           <ThemedView style={styles.titleContainer}>
-            <ThemedText type="title">Scan History</ThemedText>
+            <ThemedText type="title">History</ThemedText>
           </ThemedView>
-          <Pressable
-            style={styles.settingsButton}
-            onPress={() => setSidebarVisible(true)}
-            accessibilityLabel="Settings"
-          >
-            <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.settingsButton}
+              onPress={() => setSidebarVisible(true)}
+              accessibilityLabel="Settings"
+            >
+              <MaterialIcons name="settings" size={24} color={Colors.icon} />
+            </Pressable>
+          </View>
         </View>
         
-        <ThemedText type="subtitle" style={styles.recentScansTitle}>
-          Recent Scans ({scanHistory.length})
-        </ThemedText>
-        
-        {scanHistory.length > 0 ? (
-          scanHistory.map((scanItem, index) => (
-            <View key={scanItem.material.id} style={styles.scanCard}>
+        <View style={styles.sectionsContainer}>
+          {/* Materials Section */}
+          <ThemedView style={[styles.section, { borderTopLeftRadius: 12, borderTopRightRadius: 12 }]}>
+            <View style={styles.materialsHeader}>
+              <ThemedText type="subtitle">Recent Scans ({scanHistory.length})</ThemedText>
+            </View>
+            
+            {scanHistory.length > 0 ? (
+              scanHistory.map((scanItem, index) => (
+                <View key={scanItem.material.id} style={styles.scanCard}>
               <TouchableOpacity 
                 style={styles.scanCardTop}
                 onPress={() => navigateToMaterialDetail(scanItem.material.id)}
@@ -233,14 +239,18 @@ export default function HistoryScreen() {
                   {scanItem.scanDate && (
                     <ThemedText style={styles.scanCardDate}>Scanned: {scanItem.scanDate}</ThemedText>
                   )}
-                  <ThemedText style={styles.tapToViewText}>
-                    Tap to view details →
-                  </ThemedText>
+                  <View style={styles.tapToViewContainer}>
+                    <ThemedText style={styles.tapToViewText}>
+                      Tap to view details
+                    </ThemedText>
+                    <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                  </View>
                 </View>
               </TouchableOpacity>
+              <View style={styles.scanCardDivider} />
               <View style={styles.scanCardBottom}>
                 <ThemedText style={styles.scanCardProjectsTitle}>Possible Projects:</ThemedText>
-                <View style={styles.scanCardProjectsRow}>
+                <View style={styles.scanCardProjectsColumn}>
                   {scanItem.projects.length > 0 ? (
                     scanItem.projects.map((project, projectIndex) => (
                       <TouchableOpacity 
@@ -249,17 +259,24 @@ export default function HistoryScreen() {
                         onPress={() => navigateToProjectDetail(project.id)}
                         activeOpacity={0.7}
                       >
-                        <Image
-                          source={project.project_image ? { uri: project.project_image } : require('@/assets/images/partial-react-logo.png')}
-                          style={styles.scanCardProjectImage}
-                          resizeMode="contain"
-                        />
-                        <ThemedText style={styles.scanCardProjectName}>{project.project_name}</ThemedText>
-                        <ThemedText style={styles.scanCardProjectDifficulty}>
-                          {project.steps.length <= 3 ? 'Easy' : 
-                           project.steps.length <= 6 ? 'Medium' : 'Advanced'}
-                        </ThemedText>
-                        <ThemedText style={styles.tapToViewText}>Tap to view →</ThemedText>
+                        <View style={styles.scanCardProjectContent}>
+                          <Image
+                            source={project.project_image ? { uri: project.project_image } : require('@/assets/images/partial-react-logo.png')}
+                            style={styles.scanCardProjectImage}
+                            resizeMode="contain"
+                          />
+                          <View style={styles.scanCardProjectInfo}>
+                            <ThemedText style={styles.scanCardProjectName}>{project.project_name}</ThemedText>
+                            <ThemedText style={styles.scanCardProjectDifficulty}>
+                              {project.steps.length <= 3 ? 'Easy' : 
+                               project.steps.length <= 6 ? 'Medium' : 'Advanced'}
+                            </ThemedText>
+                          </View>
+                          <View style={styles.tapToViewContainer}>
+                            <ThemedText style={styles.tapToViewText}>Tap to view</ThemedText>
+                            <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                          </View>
+                        </View>
                       </TouchableOpacity>
                     ))
                   ) : (
@@ -275,19 +292,14 @@ export default function HistoryScreen() {
             <ThemedText style={styles.emptyStateSubtext}>Start scanning materials to see your history here!</ThemedText>
           </View>
         )}
+          </ThemedView>
+        </View>
       </RNScrollView>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-    marginTop: 50,
-  },
   reactLogo: {
     height: 178,
     width: 290,
@@ -301,8 +313,16 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   section: {
-    padding: 16,
-    justifyContent: 'flex-start',
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   divider: {
     height: 1,
@@ -317,12 +337,19 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   card: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 12,
+    padding: 16,
     alignItems: 'center',
     width: 160,
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#00630F',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   cardImage: {
     width: 80,
@@ -332,17 +359,28 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     marginBottom: 4,
+    color: '#2D5016',
+    fontWeight: '600',
   },
   cardDescription: {
     fontSize: 14,
     textAlign: 'center',
-    color: '#555',
+    color: '#4A6741',
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 16,
+  },
+  titleContainer: {
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   settingsButton: {
     padding: 8,
@@ -405,19 +443,27 @@ const styles = StyleSheet.create({
   },
   scanCard: {
     backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 20,
-    elevation: 2,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    borderWidth: 2,
+    borderColor: '#D0D0D0',
   },
   scanCardTop: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
+  },
+  scanCardDivider: {
+    height: 1,
+    backgroundColor: '#E0E0E0',
+    marginVertical: 12,
+    marginHorizontal: 0,
   },
   scanCardImage: {
     width: 56,
@@ -454,38 +500,64 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     color: '#555',
   },
-  scanCardProjectsRow: {
-    flexDirection: 'row',
+  scanCardProjectsColumn: {
+    flexDirection: 'column',
     gap: 12,
   },
   scanCardProject: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    backgroundColor: '#FAFAFA',
+    marginBottom: 8,
+  },
+  scanCardProjectContent: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 16,
+    gap: 12,
+  },
+  scanCardProjectInfo: {
+    flex: 1,
   },
   scanCardProjectImage: {
-    width: 40,
-    height: 40,
+    width: 50,
+    height: 50,
     borderRadius: 8,
-    marginBottom: 4,
     backgroundColor: '#eee',
   },
   scanCardProjectName: {
-    fontSize: 13,
+    fontSize: 15,
     color: '#333',
-    textAlign: 'center',
-    fontWeight: '500',
-    marginBottom: 2,
+    fontWeight: '600',
+    marginBottom: 4,
   },
   scanCardProjectDifficulty: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#888',
     textTransform: 'capitalize',
   },
+  tapToViewContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    borderRadius: 12,
+    gap: 4,
+  },
   tapToViewText: {
-    fontSize: 10,
+    fontSize: 12,
     color: '#007AFF',
-    marginTop: 2,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  materialsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   noProjectsText: {
     fontSize: 14,

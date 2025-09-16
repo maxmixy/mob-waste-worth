@@ -3,14 +3,12 @@ import { useRouter } from 'expo-router';
 import { Dimensions } from 'react-native';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { getUserId, updateEULAAcceptance, checkProfileCompletion } from '@/lib/user';
+import { getUserId, updateEULAAcceptance } from '@/lib/user';
 import EULA from '@/components/EULA';
 
 const { height: screenHeight } = Dimensions.get('window');
 
 export default function EULAPage() {
-  const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
 
   const handleAccept = async () => {
@@ -19,16 +17,8 @@ export default function EULAPage() {
       if (userId) {
         const success = await updateEULAAcceptance(userId, true);
         if (success) {
-          // Check if user has completed their profile
-          const profileStatus = await checkProfileCompletion(userId);
-          
-          if (!profileStatus.profileCompleted) {
-            // User needs to create their profile
-            router.replace('/(login)/profile');
-          } else {
-            // User has completed both EULA and profile, proceed to main app
-            router.replace('/(tabs)');
-          }
+          // Always go to profile page after accepting EULA
+          router.replace('/(login)/profile');
         } else {
           alert('Failed to save EULA acceptance. Please try again.');
         }
@@ -48,17 +38,17 @@ export default function EULAPage() {
       if (userId) {
         await updateEULAAcceptance(userId, false);
       }
-      // Return to login screen
-      router.replace('/(login)');
+      // Return to signup screen instead of login
+      router.replace('/(login)/signup');
     } catch (error) {
       console.error('Error declining EULA:', error);
-      // Still return to login screen even if there's an error
-      router.replace('/(login)');
+      // Still return to signup screen even if there's an error
+      router.replace('/(login)/signup');
     }
   };
 
   return (
-    <ThemedView style={{ flex: 1, backgroundColor: Colors[colorScheme].background }}>
+    <ThemedView style={{ flex: 1, backgroundColor: Colors.background }}>
       <ThemedView style={{ height: screenHeight * 0.03 }} />
       <EULA onAccept={handleAccept} onDecline={handleDecline} />
     </ThemedView>

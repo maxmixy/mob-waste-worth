@@ -1,21 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, ScrollView, Alert, ActivityIndicator, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
-import { ThemedText } from '@/components/ThemedText';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { ThemedView } from '@/components/ThemedView';
+import { ThemedText } from '@/components/ThemedText';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { getUserId, checkProfileCompletion } from '@/lib/user';
+import { getUserId, checkProfileCompletion, updateUserProfile } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import { questService } from '@/lib/questService';
 import { useAuth } from '@/contexts/AuthContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { Pressable } from 'react-native';
+
 import * as ImagePicker from 'expo-image-picker';
 
 export default function ProfileSettingsScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
   const { userId: authUserId } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -23,6 +23,7 @@ export default function ProfileSettingsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+
   const [showActionSheet, setShowActionSheet] = useState(false);
 
   useEffect(() => {
@@ -31,6 +32,14 @@ export default function ProfileSettingsScreen() {
     loadProfileData();
   }, []);
 
+  // Refresh profile data when screen comes into focus (e.g., returning from edit profile)
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 ProfileSettingsScreen focused, refreshing data');
+      loadProfileData();
+    }, [])
+  );
+
   const loadProfileData = async () => {
     try {
       setLoading(true);
@@ -38,7 +47,8 @@ export default function ProfileSettingsScreen() {
       if (currentUserId) {
         setUserId(currentUserId);
         const profileInfo = await checkProfileCompletion(currentUserId);
-        if (profileInfo.profileCompleted) {
+        if (profileInfo.profileCompleted && profileInfo.profileData) {
+          console.log('Profile data loaded:', profileInfo.profileData);
           setProfileData(profileInfo.profileData);
         }
         
@@ -68,6 +78,31 @@ export default function ProfileSettingsScreen() {
 
   const handleBack = () => {
     router.back();
+  };
+
+  // Helper function to get profile picture source
+  const getProfilePictureSource = () => {
+    // First check if we have a profile picture from profileData (this takes priority)
+    if (profileData?.profilePicture) {
+      switch (profileData.profilePicture) {
+        case 'guest profile 1.svg':
+          return require('@/assets/images/guest profile 1.svg');
+        case 'guest profile 2.svg':
+          return require('@/assets/images/guest profile 2.svg');
+        case 'guest profile 3.svg':
+          return require('@/assets/images/guest profile 3.svg');
+        default:
+          return require('@/assets/images/partial-react-logo.png');
+      }
+    }
+    
+    // If no profile data picture, check for uploaded image
+    if (profileImageUrl) {
+      return { uri: profileImageUrl };
+    }
+    
+    // Default fallback
+    return require('@/assets/images/partial-react-logo.png');
   };
 
   const refreshProfileImage = async () => {
@@ -251,6 +286,15 @@ export default function ProfileSettingsScreen() {
       if (response.success && response.imageUrl) {
         console.log('Upload successful, setting image URL:', response.imageUrl);
         setProfileImageUrl(response.imageUrl);
+        
+        // Clear the profile picture from profile data since we now have an uploaded image
+        if (profileData) {
+          setProfileData({
+            ...profileData,
+            profilePicture: null // Clear the guest profile SVG
+          });
+        }
+        
         Alert.alert('Success', 'Profile image updated successfully!');
         
         // Track quest progress for profile action
@@ -271,6 +315,14 @@ export default function ProfileSettingsScreen() {
       } else {
         console.log('Upload failed (web server not ready):', response.error);
         // Still show the image locally even if upload fails
+        // Clear the profile picture from profile data since we now have a local image
+        if (profileData) {
+          setProfileData({
+            ...profileData,
+            profilePicture: null // Clear the guest profile SVG
+          });
+        }
+        
         Alert.alert(
           'Image Selected', 
           'Image selected successfully! Upload to server will work once web files are deployed.',
@@ -281,6 +333,15 @@ export default function ProfileSettingsScreen() {
       console.error('Error uploading image:', error);
       // Still show the image locally even if upload fails
       setProfileImageUrl(imageUri);
+      
+      // Clear the profile picture from profile data since we now have a local image
+      if (profileData) {
+        setProfileData({
+          ...profileData,
+          profilePicture: null // Clear the guest profile SVG
+        });
+      }
+      
       Alert.alert(
         'Image Selected', 
         'Image selected successfully! Upload to server will work once web files are deployed.',
@@ -301,19 +362,18 @@ export default function ProfileSettingsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
-        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
-        <ThemedText style={styles.loadingText}>Loading profile...</ThemedText>
+      <View style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
+        <LogoLoadingAnimation size={120} showBackground={true} />
       </View>
     );
   }
 
   return (
-    <ThemedView style={[styles.container, { backgroundColor: Colors[colorScheme].background }]}>
+    <ThemedView style={[styles.container, { backgroundColor: Colors.background }]}>
       {/* Header */}
       <ThemedView style={styles.header}>
         <Pressable onPress={handleBack} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={Colors[colorScheme].text} />
+          <MaterialIcons name="arrow-back" size={24} color={Colors.text} />
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Profile Settings</ThemedText>
         <View style={styles.placeholder} />
@@ -324,7 +384,7 @@ export default function ProfileSettingsScreen() {
         <ThemedView style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <Image
-              source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
+              source={getProfilePictureSource()}
               style={styles.avatar}
               resizeMode="cover"
             />
@@ -363,12 +423,12 @@ export default function ProfileSettingsScreen() {
           
           <View style={styles.buttonRow}>
             <Pressable style={styles.editButton} onPress={handleEditProfile}>
-              <MaterialIcons name="edit" size={20} color={Colors[colorScheme].icon} />
+              <MaterialIcons name="edit" size={20} color="#FFFFFF" />
               <ThemedText style={styles.editButtonText}>Edit Profile</ThemedText>
             </Pressable>
             
             <Pressable style={styles.refreshButton} onPress={refreshProfileImage}>
-              <MaterialIcons name="refresh" size={20} color={Colors[colorScheme].icon} />
+              <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
               <ThemedText style={styles.refreshButtonText}>Refresh Image</ThemedText>
             </Pressable>
           </View>
@@ -444,22 +504,16 @@ export default function ProfileSettingsScreen() {
 
         {/* Actions */}
         <ThemedView style={styles.actionsSection}>
-          <Pressable style={styles.actionButton} onPress={handleEditProfile}>
-            <MaterialIcons name="edit" size={24} color={Colors[colorScheme].icon} />
-            <ThemedText style={styles.actionButtonText}>Edit Profile</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={Colors[colorScheme].icon} />
-          </Pressable>
-
           <Pressable style={styles.actionButton}>
-            <MaterialIcons name="security" size={24} color={Colors[colorScheme].icon} />
+            <MaterialIcons name="security" size={24} color="#00630F" />
             <ThemedText style={styles.actionButtonText}>Privacy & Security</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={Colors[colorScheme].icon} />
+            <MaterialIcons name="chevron-right" size={24} color={Colors.icon} />
           </Pressable>
 
           <Pressable style={styles.actionButton}>
-            <MaterialIcons name="notifications" size={24} color={Colors[colorScheme].icon} />
+            <MaterialIcons name="notifications" size={24} color="#00630F" />
             <ThemedText style={styles.actionButtonText}>Notification Settings</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={Colors[colorScheme].icon} />
+            <MaterialIcons name="chevron-right" size={24} color={Colors.icon} />
           </Pressable>
         </ThemedView>
       </ScrollView>
@@ -536,8 +590,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 50,
     paddingBottom: 20,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: '#00630F',
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   backButton: {
     padding: 8,
@@ -556,9 +612,16 @@ const styles = StyleSheet.create({
   profileSection: {
     alignItems: 'center',
     paddingVertical: 30,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    paddingHorizontal: 20,
     marginBottom: 20,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   avatarContainer: {
     position: 'relative',
@@ -604,7 +667,7 @@ const styles = StyleSheet.create({
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#00630F',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -613,11 +676,12 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     fontWeight: '600',
+    color: '#FFFFFF',
   },
   refreshButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e3f2fd',
+    backgroundColor: '#4A9B5C',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -626,10 +690,18 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     fontWeight: '600',
-    color: '#1976d2',
+    color: '#FFFFFF',
   },
   infoSection: {
     marginBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   sectionTitle: {
     fontSize: 18,
@@ -656,6 +728,15 @@ const styles = StyleSheet.create({
   },
   actionsSection: {
     marginBottom: 20,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   actionButton: {
     flexDirection: 'row',
@@ -663,7 +744,9 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 4,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#E0E0E0',
+    borderRadius: 8,
+    marginBottom: 8,
   },
   actionButtonText: {
     flex: 1,
