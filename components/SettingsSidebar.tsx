@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, TouchableOpacity, StyleSheet, Alert, View, ScrollView } from 'react-native';
+import { Modal, TouchableOpacity, StyleSheet, Alert, View, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { usePalette } from '@/hooks/usePalette';
-import { useThemeVariant, ThemeVariant, ThemeScheme } from '@/hooks/ThemeContext';
 import { getUserId, logoutUser, checkProfileCompletion } from '@/lib/user';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
+import { useLocation } from '@/hooks/useLocation';
+import { useClimate } from '@/hooks/useClimate';
 
 interface SettingsSidebarProps {
   visible: boolean;
@@ -17,13 +16,32 @@ interface SettingsSidebarProps {
 }
 
 export default function SettingsSidebar({ visible, onClose }: SettingsSidebarProps) {
-  const colorScheme = useColorScheme() ?? 'light';
-  const { variant, setVariant, scheme, setScheme } = useThemeVariant();
-  const P = usePalette();
   const router = useRouter();
   const [userName, setUserName] = useState('User');
   const [userProfile, setUserProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  
+  // Location and climate functionality
+  const { location, error: locationError, loading: locationLoading, requestLocation } = useLocation();
+  const { climateData, loading: climateLoading, error: climateError, getClimateForLocation } = useClimate();
+
+  // Helper function to get profile picture source
+  const getProfilePictureSource = (profilePicture: string | undefined) => {
+    if (!profilePicture) {
+      return require('@/assets/images/partial-react-logo.png');
+    }
+    
+    switch (profilePicture) {
+      case 'guest profile 1.svg':
+        return require('@/assets/images/guest profile 1.svg');
+      case 'guest profile 2.svg':
+        return require('@/assets/images/guest profile 2.svg');
+      case 'guest profile 3.svg':
+        return require('@/assets/images/guest profile 3.svg');
+      default:
+        return require('@/assets/images/partial-react-logo.png');
+    }
+  };
 
   useEffect(() => {
     if (visible) {
@@ -49,113 +67,20 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
     }
   };
 
-  const handleLogout = () => {
-    console.log('Logout button pressed');
+  const handleLogout = async () => {
+    console.log('Logout button pressed - starting immediate logout');
     
-    // Close the sidebar first to avoid modal conflicts
-    onClose();
-    
-    // Use setTimeout to ensure the sidebar is closed before showing alert
-    setTimeout(() => {
-      console.log('Showing logout confirmation alert');
-      
-      // Try to show the alert with a longer timeout
-      try {
-        Alert.alert(
-          'Logout',
-          'Are you sure you want to logout?',
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => {
-                console.log('Logout cancelled');
-              }
-            },
-            {
-              text: 'Logout',
-              style: 'destructive',
-              onPress: async () => {
-                console.log('User confirmed logout');
-                try {
-                  setLoading(true);
-                  console.log('Starting logout process...');
-                  await logoutUser();
-                  console.log('Logout successful, navigating to login...');
-                  
-                  // Try multiple navigation methods to ensure it works
-                  console.log('Attempting navigation to login...');
-                  try {
-                    console.log('Trying router.push to /(login)');
-                    router.push('/(login)');
-                    console.log('Router.push completed successfully');
-                  } catch (navError) {
-                    console.error('Router push failed, trying replace:', navError);
-                    try {
-                      console.log('Trying router.replace to /(login)');
-                      router.replace('/(login)');
-                      console.log('Router.replace completed successfully');
-                    } catch (replaceError) {
-                      console.error('Router replace also failed:', replaceError);
-                      // As a last resort, try to navigate to the root and then to login
-                      console.log('Trying fallback navigation via root');
-                      router.replace('/');
-                      setTimeout(() => {
-                        console.log('Trying delayed navigation to login');
-                        router.push('/(login)');
-                      }, 100);
-                    }
-                  }
-                } catch (error) {
-                  console.error('Logout error:', error);
-                  Alert.alert('Error', 'Failed to logout. Please try again.');
-                } finally {
-                  setLoading(false);
-                }
-              },
-            },
-          ],
-          { cancelable: true }
-        );
-      } catch (alertError) {
-        console.error('Alert failed to show:', alertError);
-        // Fallback: proceed with logout without confirmation
-        console.log('Proceeding with logout without confirmation due to alert error');
-        performLogout();
-      }
-    }, 200);
-  };
-
-  const performLogout = async () => {
     try {
       setLoading(true);
+      
+      // Close the sidebar immediately
+      onClose();
+      
       console.log('Starting logout process...');
       await logoutUser();
-      console.log('Logout successful, navigating to login...');
+      console.log('Logout successful - AuthGuard will handle navigation');
+      // Don't manually navigate - let AuthGuard handle redirection automatically
       
-      // Try multiple navigation methods to ensure it works
-      console.log('Attempting navigation to login...');
-      try {
-        console.log('Trying router.push to /(login)');
-        router.push('/(login)');
-        console.log('Router.push completed successfully');
-      } catch (navError) {
-        console.error('Router push failed, trying replace:', navError);
-        try {
-          console.log('Trying router.replace to /(login)');
-          router.replace('/(login)');
-          console.log('Router.replace completed successfully');
-        } catch (replaceError) {
-          console.error('Router replace also failed:', replaceError);
-          // As a last resort, try to navigate to the root and then to login
-          console.log('Trying fallback navigation via root');
-          router.replace('/');
-          setTimeout(() => {
-            console.log('Trying delayed navigation to login');
-            router.push('/(login)');
-          }, 100);
-        }
-      }
     } catch (error) {
       console.error('Logout error:', error);
       Alert.alert('Error', 'Failed to logout. Please try again.');
@@ -163,6 +88,7 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
       setLoading(false);
     }
   };
+
 
   const handleProfile = () => {
     onClose();
@@ -174,6 +100,19 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
     router.push('/pages/about');
   };
 
+  const handleLocationRequest = async () => {
+    try {
+      console.log('🌍 Requesting location from settings...');
+      await requestLocation();
+      if (location) {
+        console.log('🌍 Location obtained, getting climate data...');
+        await getClimateForLocation(location);
+      }
+    } catch (error) {
+      console.error('🌍 Error getting location:', error);
+    }
+  };
+
   return (
     <Modal
       visible={visible}
@@ -181,26 +120,28 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
       transparent
       onRequestClose={onClose}
     >
-      <TouchableOpacity 
-        style={styles.overlay} 
-        activeOpacity={1} 
-        onPress={onClose}
-      />
-      <ThemedView style={[styles.sidebar, { backgroundColor: P.background }]}> 
-          {/* Header */}
-          <ThemedView style={[styles.header, { borderBottomColor: P.border }]}>
-            <ThemedText type="title" style={styles.headerTitle}>Settings</ThemedText>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialIcons name="close" size={24} color={P.icon} />
-            </TouchableOpacity>
-          </ThemedView>
+      <View style={styles.modalContainer}>
+        <View style={styles.overlay} />
+        <View style={styles.sidebar}>
+          <ScrollView 
+            style={styles.scrollContainer}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={true}
+            bounces={true}
+          >
+            {/* Header */}
+            <ThemedView style={styles.header}>
+              <ThemedText type="title" style={styles.headerTitle}>Settings</ThemedText>
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <MaterialIcons name="close" size={24} color="#2D5016" />
+              </TouchableOpacity>
+            </ThemedView>
 
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
             {/* User Profile Section */}
-            <ThemedView style={[styles.profileSection, { borderBottomColor: P.border }]}>
+            <ThemedView style={styles.profileSection}>
               <View style={styles.userImageContainer}>
                 <Image
-                  source={require('@/assets/images/partial-react-logo.png')}
+                  source={getProfilePictureSource(userProfile?.profilePicture)}
                   style={styles.userImage}
                   resizeMode="cover"
                 />
@@ -208,114 +149,173 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
               <ThemedText type="subtitle" style={styles.userName}>{userName}</ThemedText>
             </ThemedView>
 
-            {/* Menu Items */}
-            <ThemedView style={styles.menuContainer}>
-              <TouchableOpacity 
-                style={[styles.menuItem, { borderBottomColor: P.text + '20' }]}
-                onPress={handleProfile}
-              >
-                <MaterialIcons name="person" size={24} color={P.icon} />
-                <ThemedText style={styles.menuText}>Profile</ThemedText>
-                <MaterialIcons name="chevron-right" size={24} color={P.icon} />
-              </TouchableOpacity>
-
-              {/* Themes picker */}
-              <ThemedView style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: P.text + '20' }}>
-                <ThemedText style={{ fontSize: 14, opacity: 0.7, marginBottom: 10 }}>Theme</ThemedText>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                  {(['green'] as ThemeVariant[]).map((key) => (
-                    <TouchableOpacity
-                      key={key}
-                      accessibilityRole="button"
-                      onPress={() => setVariant(key)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingVertical: 8,
-                        paddingHorizontal: 12,
-                        borderRadius: 999,
-                        borderWidth: 1,
-                        borderColor: variant === key ? P.primary : P.border,
-                        backgroundColor: variant === key ? P.backgroundSecondary : 'transparent',
-                        marginRight: 10,
-                        marginBottom: 10,
-                      }}
-                    >
-                      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: P.primary, marginRight: 8 }} />
-                      <ThemedText style={{ fontSize: 14, textTransform: 'capitalize' }}>{key}</ThemedText>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <ThemedText style={{ fontSize: 14, opacity: 0.7, marginVertical: 10 }}>Appearance</ThemedText>
-                <View style={{ flexDirection: 'row' }}>
-                  {(['light','dark'] as ThemeScheme[]).map((s) => (
-                    <TouchableOpacity key={s} onPress={() => setScheme(s)} style={{
-                      paddingVertical: 8,
-                      paddingHorizontal: 12,
-                      borderRadius: 999,
-                      borderWidth: 1,
-                      borderColor: scheme === s ? P.primary : P.border,
-                      backgroundColor: scheme === s ? P.backgroundSecondary : 'transparent',
-                      marginRight: 10,
-                    }}>
-                      <ThemedText style={{ textTransform: 'capitalize' }}>{s}</ThemedText>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ThemedView>
-
-              <TouchableOpacity 
-                style={[styles.menuItem, { borderBottomColor: P.text + '20' }]}
-                onPress={handleAbout}
-              >
-                <MaterialIcons name="info" size={24} color={P.icon} />
-                <ThemedText style={styles.menuText}>About</ThemedText>
-                <MaterialIcons name="chevron-right" size={24} color={P.icon} />
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.menuItem, { borderBottomColor: P.text + '20' }]}
-                onPress={() => {
-                  onClose();
-                }}
-              >
-                <MaterialIcons name="notifications" size={24} color={P.icon} />
-                <ThemedText style={styles.menuText}>Notifications</ThemedText>
-                <MaterialIcons name="chevron-right" size={24} color={P.icon} />
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.menuItem, { borderBottomColor: P.text + '20' }]}
-                onPress={() => {
-                  onClose();
-                }}
-              >
-                <MaterialIcons name="privacy-tip" size={24} color={P.icon} />
-                <ThemedText style={styles.menuText}>Privacy</ThemedText>
-                <MaterialIcons name="chevron-right" size={24} color={P.icon} />
-              </TouchableOpacity>
+        {/* Location Section */}
+        <ThemedView style={styles.locationSection}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>Location</ThemedText>
+          
+          {locationError && (
+            <ThemedView style={styles.locationErrorContainer}>
+              <MaterialIcons name="error" size={16} color="#f44336" />
+              <ThemedText style={styles.locationErrorText}>
+                {locationError.message}
+              </ThemedText>
             </ThemedView>
-
-            {/* Logout Button */}
-            <ThemedView style={styles.logoutContainer}>
-              <TouchableOpacity 
-                style={[styles.logoutButton, { backgroundColor: '#f44336' }]}
-                onPress={handleLogout}
-                disabled={loading}
-              >
-                <MaterialIcons name="logout" size={24} color="white" />
-                <ThemedText style={[styles.logoutText, { color: 'white' }]}>
-                  {loading ? 'Logging out...' : 'Logout'}
-                </ThemedText>
-              </TouchableOpacity>
+          )}
+          
+          {location ? (
+            <ThemedView style={styles.locationInfoContainer}>
+              <View style={styles.locationInfo}>
+                <MaterialIcons name="place" size={20} color="#00630F" />
+                <View style={styles.locationDetails}>
+                  <ThemedText style={styles.locationCoordinates}>
+                    {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+                  </ThemedText>
+                  {location.accuracy && (
+                    <ThemedText style={styles.locationAccuracy}>
+                      Accuracy: {location.accuracy.toFixed(0)}m
+                    </ThemedText>
+                  )}
+                </View>
+              </View>
+              
+              {/* Climate Information */}
+              {climateLoading && (
+                <ThemedView style={styles.climateLoadingContainer}>
+                  <MaterialIcons name="refresh" size={16} color="#00630F" />
+                  <ThemedText style={styles.climateLoadingText}>Getting climate data...</ThemedText>
+                </ThemedView>
+              )}
+              
+              {climateError && (
+                <ThemedView style={styles.climateErrorContainer}>
+                  <MaterialIcons name="warning" size={16} color="#ff9800" />
+                  <ThemedText style={styles.climateErrorText}>
+                    Climate data unavailable
+                  </ThemedText>
+                </ThemedView>
+              )}
+              
+              {climateData && (
+                <ThemedView style={styles.climateInfoContainer}>
+                  <View style={styles.climateHeader}>
+                    <MaterialIcons name="wb-sunny" size={16} color="#FF9800" />
+                    <ThemedText style={styles.climateZoneText}>
+                      {climateData.climateZone} Climate
+                    </ThemedText>
+                  </View>
+                  
+                  <View style={styles.climateDetails}>
+                    <View style={styles.climateDetailRow}>
+                      <MaterialIcons name="thermostat" size={14} color="#666" />
+                      <ThemedText style={styles.climateDetailText}>
+                        {climateData.temperature.average}°{climateData.temperature.unit}
+                      </ThemedText>
+                    </View>
+                    <View style={styles.climateDetailRow}>
+                      <MaterialIcons name="opacity" size={14} color="#666" />
+                      <ThemedText style={styles.climateDetailText}>
+                        {climateData.humidity}% humidity
+                      </ThemedText>
+                    </View>
+                  </View>
+                </ThemedView>
+              )}
             </ThemedView>
+          ) : (
+            <ThemedView style={styles.locationEmptyState}>
+              <MaterialIcons name="location-off" size={24} color="#ccc" />
+              <ThemedText style={styles.locationEmptyText}>
+                No location data
+              </ThemedText>
+            </ThemedView>
+          )}
+          
+          <TouchableOpacity
+            style={[styles.locationButton, { backgroundColor: Colors.tint }]}
+            onPress={handleLocationRequest}
+            disabled={locationLoading}
+          >
+            <MaterialIcons 
+              name="my-location" 
+              size={16} 
+              color="white" 
+            />
+            <ThemedText style={styles.locationButtonText}>
+              {locationLoading ? 'Getting...' : 'Get Location'}
+            </ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
+
+        {/* Menu Items */}
+        <ThemedView style={styles.menuContainer}>
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={handleProfile}
+          >
+            <MaterialIcons name="person" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Profile</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={handleAbout}
+          >
+            <MaterialIcons name="info" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>About</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={() => {
+              onClose();
+              // Add notification settings if needed
+            }}
+          >
+            <MaterialIcons name="notifications" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Notifications</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={() => {
+              onClose();
+              // Add privacy settings if needed
+            }}
+          >
+            <MaterialIcons name="privacy-tip" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Privacy</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+        </ThemedView>
+
+        {/* Logout Button */}
+        <ThemedView style={styles.logoutContainer}>
+          <TouchableOpacity 
+            style={[styles.logoutButton, { backgroundColor: '#f44336' }]}
+            onPress={handleLogout}
+            disabled={loading}
+          >
+            <MaterialIcons name="logout" size={24} color="white" />
+            <ThemedText style={[styles.logoutText, { color: 'white' }]}>
+              {loading ? 'Logging out...' : 'Logout'}
+            </ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
           </ScrollView>
-      </ThemedView>
+        </View>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  modalContainer: {
+    flex: 1,
+    flexDirection: 'row',
+  },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -328,7 +328,24 @@ const styles = StyleSheet.create({
     width: '80%',
     maxWidth: 300,
     paddingTop: 50,
-    height: '100%'
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderBottomLeftRadius: 20,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    borderRightWidth: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: -2, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
   },
   header: {
     flexDirection: 'row',
@@ -337,10 +354,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     borderBottomWidth: 1,
+    borderBottomColor: Colors.primary,
+    backgroundColor: 'transparent',
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
+    color: '#2D5016',
   },
   closeButton: {
     padding: 8,
@@ -349,7 +369,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: Colors.primary,
+    backgroundColor: 'transparent',
   },
   userImageContainer: {
     width: 80,
@@ -365,10 +386,150 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 18,
     fontWeight: '600',
+    color: '#2D5016',
+  },
+  locationSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#00630F',
+    backgroundColor: 'transparent',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    color: '#2D5016',
+  },
+  locationErrorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    padding: 8,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  locationErrorText: {
+    color: '#c62828',
+    fontSize: 12,
+    marginLeft: 6,
+    flex: 1,
+  },
+  locationInfoContainer: {
+    backgroundColor: 'transparent',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  locationInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  locationDetails: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  locationCoordinates: {
+    fontSize: 12,
+    fontFamily: 'monospace',
+    color: '#00630F',
+    fontWeight: '600',
+  },
+  locationAccuracy: {
+    fontSize: 10,
+    color: '#00630F',
+    marginTop: 2,
+  },
+  locationEmptyState: {
+    alignItems: 'center',
+    padding: 12,
+    marginBottom: 12,
+  },
+  locationEmptyText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    gap: 6,
+  },
+  locationButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  climateLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
+    marginTop: 8,
+    backgroundColor: 'transparent',
+  },
+  climateLoadingText: {
+    fontSize: 10,
+    color: Colors.primary,
+    marginLeft: 6,
+  },
+  climateErrorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff3e0',
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 8,
+  },
+  climateErrorText: {
+    color: '#f57c00',
+    fontSize: 10,
+    marginLeft: 6,
+    flex: 1,
+  },
+  climateInfoContainer: {
+    backgroundColor: 'transparent',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  climateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  climateZoneText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginLeft: 4,
+  },
+  climateDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  climateDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  climateDetailText: {
+    fontSize: 10,
+    color: '#666',
+    marginLeft: 4,
   },
   menuContainer: {
     flex: 1,
     paddingTop: 20,
+    backgroundColor: 'transparent',
   },
   menuItem: {
     flexDirection: 'row',
@@ -381,11 +542,13 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 15,
     fontSize: 16,
+    color: Colors.text,
   },
   logoutContainer: {
     padding: 20,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: Colors.primary,
+    backgroundColor: 'transparent',
   },
   logoutButton: {
     flexDirection: 'row',
