@@ -5,18 +5,19 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams } from 'expo-router';
 
-import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { ThemedText } from '@/components/ThemedText';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import { questService } from '@/lib/questService';
-import { ScrollView as RNScrollView } from 'react-native';
 
+import { ScrollView as RNScrollView } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
+
 import SettingsSidebar from '@/components/SettingsSidebar';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
@@ -24,7 +25,6 @@ const API_BASE_URL = 'http://127.0.0.1:5000';
 interface PostMedia {
   media_type: string;
   media_path: string;
-  order_index: number;
 }
 
 interface PostComment {
@@ -46,7 +46,6 @@ interface PostData {
 }
 
 export default function CommunityScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
   const params = useLocalSearchParams();
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [posts, setPosts] = useState<PostData[]>([]);
@@ -732,16 +731,15 @@ export default function CommunityScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
-        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
-        <ThemedText style={styles.loadingText}>Loading community posts...</ThemedText>
+      <View style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
+        <LogoLoadingAnimation size={120} showBackground={true} />
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={[styles.errorContainer, { backgroundColor: Colors[colorScheme].background }]}>
+      <View style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
         <ThemedText style={styles.errorText}>{error}</ThemedText>
       </View>
     );
@@ -754,7 +752,7 @@ export default function CommunityScreen() {
         onClose={() => setSidebarVisible(false)} 
       />
       <RNScrollView
-        style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
+        style={{ flex: 1, padding: 16, backgroundColor: Colors.background }}
         contentContainerStyle={{ flexGrow: 1 }}
       >
         <View style={styles.headerRow}>
@@ -766,14 +764,14 @@ export default function CommunityScreen() {
             onPress={() => setSidebarVisible(true)}
             accessibilityLabel="Settings"
           >
-            <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
+            <MaterialIcons name="settings" size={24} color={Colors.icon} />
           </Pressable>
         </View>
 
-                 {/* Share Post Container */}
-         <ThemedView style={[styles.shareContainer, { flexDirection: 'column' }]}>
-           {/* Top row with profile and input */}
-           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                 {/* Share Post Container - Facebook Style */}
+         <ThemedView style={styles.shareContainer}>
+           {/* Header with profile info */}
+           <View style={styles.shareHeader}>
              <Pressable onPress={refreshProfileImage} style={styles.shareProfileImageContainer}>
                <Image
                  source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
@@ -790,25 +788,24 @@ export default function CommunityScreen() {
                  </View>
                )}
              </Pressable>
-             <ThemedText style={styles.shareProfileName}>
-               {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : (userId || 'Guest')}
-             </ThemedText>
+             <View style={styles.shareUserInfo}>
+               <ThemedText style={styles.shareProfileName}>
+                 {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : (userId || 'Guest')}
+               </ThemedText>
+             </View>
+           </View>
+           
+           {/* Text Input Area */}
+           <View style={styles.shareInputContainer}>
              <TextInput
                style={styles.shareInput}
-               placeholder="What would you like to share?"
-               placeholderTextColor="#888"
+               placeholder="Share your thoughts..."
+               placeholderTextColor={Colors.textMuted}
                value={postText}
                onChangeText={setPostText}
+               multiline
+               textAlignVertical="top"
              />
-             <TouchableOpacity 
-               style={[styles.postButton, (!postText.trim() && selectedImages.length === 0) && styles.postButtonDisabled]}
-               onPress={handleCreatePost}
-               disabled={!postText.trim() && selectedImages.length === 0}
-             >
-               <ThemedText style={[styles.postButtonText, (!postText.trim() && selectedImages.length === 0) && styles.postButtonTextDisabled]}>
-                 Post
-               </ThemedText>
-             </TouchableOpacity>
            </View>
            
            {/* Selected images display */}
@@ -827,56 +824,68 @@ export default function CommunityScreen() {
                      </TouchableOpacity>
                    </View>
                  ))}
-                                </RNScrollView>
+               </RNScrollView>
              </View>
            )}
+           
+           {/* Action Buttons Row */}
+           <View style={styles.shareActionsRow}>
+             <TouchableOpacity 
+               style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
+               onPress={handlePhotoUpload} 
+               activeOpacity={0.7}
+               disabled={isProcessingAction}
+             >
+               <MaterialIcons 
+                 name="image" 
+                 size={24} 
+                 color={isProcessingAction ? Colors.icon : Colors.primary} 
+               />
+               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
+                 Photos
+               </ThemedText>
+             </TouchableOpacity>
+             <TouchableOpacity 
+               style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
+               onPress={handleLinkShare} 
+               activeOpacity={0.7}
+               disabled={isProcessingAction}
+             >
+               <FontAwesome5 
+                 name="link" 
+                 size={22} 
+                 color={isProcessingAction ? Colors.icon : Colors.primary} 
+               />
+               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
+                 Links
+               </ThemedText>
+             </TouchableOpacity>
+             <TouchableOpacity 
+               style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
+               onPress={handleCameraCapture} 
+               activeOpacity={0.7}
+               disabled={isProcessingAction}
+             >
+               <Ionicons 
+                 name="camera" 
+                 size={24} 
+                 color={isProcessingAction ? Colors.icon : Colors.primary} 
+               />
+               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
+                 Camera
+               </ThemedText>
+             </TouchableOpacity>
+             <TouchableOpacity 
+               style={[styles.postButton, (!postText.trim() && selectedImages.length === 0) && styles.postButtonDisabled]}
+               onPress={handleCreatePost}
+               disabled={!postText.trim() && selectedImages.length === 0}
+             >
+               <ThemedText style={[styles.postButtonText, (!postText.trim() && selectedImages.length === 0) && styles.postButtonTextDisabled]}>
+                 Post
+               </ThemedText>
+             </TouchableOpacity>
+           </View>
          </ThemedView>
-         
-                   {/* Share Options Row (Action Buttons at the bottom of the share container) */}
-          <View style={styles.shareActionsRow}>
-            <TouchableOpacity 
-              style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
-              onPress={handlePhotoUpload} 
-              activeOpacity={0.7}
-              disabled={isProcessingAction}
-            >
-              <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
-                <MaterialIcons 
-                  name="image" 
-                  size={24} 
-                  color={isProcessingAction ? Colors[colorScheme].icon : Colors[colorScheme].primary} 
-                /> Photos
-              </ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
-              onPress={handleLinkShare} 
-              activeOpacity={0.7}
-              disabled={isProcessingAction}
-            >
-              <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
-                <FontAwesome5 
-                  name="link" 
-                  size={22} 
-                  color={isProcessingAction ? Colors[colorScheme].icon : Colors[colorScheme].accent} 
-                /> Links
-              </ThemedText>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
-              onPress={handleCameraCapture} 
-              activeOpacity={0.7}
-              disabled={isProcessingAction}
-            >
-              <ThemedText style={styles.shareActionLabel}> 
-                <Ionicons 
-                  name="camera" 
-                  size={24} 
-                  color={isProcessingAction ? Colors[colorScheme].icon : Colors[colorScheme].warning} 
-                /> Camera
-              </ThemedText>
-            </TouchableOpacity>
-          </View>
 
          <ThemedText type="subtitle" style={styles.subtitle}>
            Recent Posts ({posts.length})
@@ -1195,15 +1204,18 @@ const styles = StyleSheet.create({
     color: '#222',
   },
   postCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 16,
+    padding: 20,
     marginBottom: 20,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#00630F',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   postHeader: {
     flexDirection: 'row',
@@ -1227,7 +1239,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
@@ -1236,16 +1248,16 @@ const styles = StyleSheet.create({
   postUser: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#222',
+    color: '#2D5016',
   },
   postDate: {
     fontSize: 12,
-    color: '#888',
+    color: '#4A6741',
   },
   postContent: {
     fontSize: 15,
     marginBottom: 8,
-    color: '#333',
+    color: '#2D5016',
   },
   postImage: {
     width: '100%',
@@ -1267,11 +1279,11 @@ const styles = StyleSheet.create({
   actionText: {
     marginLeft: 4,
     fontSize: 14,
-    color: '#333',
+    color: '#4A6741',
   },
   commentText: {
     fontSize: 13,
-    color: '#555',
+    color: '#4A6741',
     marginBottom: 4,
   },
   commentInputRow: {
@@ -1296,13 +1308,13 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 18,
-    color: '#666',
+    color: '#4A6741',
     textAlign: 'center',
     marginBottom: 8,
   },
   emptyStateSubtext: {
     fontSize: 14,
-    color: '#999',
+    color: '#4A6741',
     textAlign: 'center',
   },
   loadingContainer: {
@@ -1387,27 +1399,37 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   shareContainer: {
+    backgroundColor: Colors.backgroundCard,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  shareHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f8f8',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 0,
+    marginBottom: 12,
   },
   shareProfileImageContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: '#eee',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 12,
   },
   shareProfileImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   imageSourceIndicator: {
     position: 'absolute',
@@ -1416,63 +1438,83 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'white',
   },
+  shareUserInfo: {
+    flex: 1,
+  },
   shareProfileName: {
     fontSize: 16,
     fontWeight: '600',
-    marginLeft: 10,
-    color: '#222',
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  shareUserSubtext: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+  },
+  shareInputContainer: {
+    backgroundColor: Colors.backgroundSecondary,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    minHeight: 60,
   },
   shareInput: {
-    flex: 1,
     fontSize: 16,
-    color: '#222',
+    color: Colors.text,
     backgroundColor: 'transparent',
     borderWidth: 0,
     padding: 0,
-    marginHorizontal: 8,
+    textAlignVertical: 'top',
+    minHeight: 36,
   },
   shareActionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 18,
+    marginTop: 0,
+    marginBottom: 0,
     gap: 8,
-    paddingHorizontal: 4,
+    paddingHorizontal: 0,
   },
   shareActionButton: {
     flex: 1,
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: Colors.backgroundSecondary,
     borderRadius: 8,
     paddingVertical: 10,
+    paddingHorizontal: 8,
     marginHorizontal: 2,
     elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 2,
+    minHeight: 50,
   },
   shareActionLabel: {
     marginTop: 4,
-    color: '#2D5016',
+    color: Colors.primary,
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 12,
+    textAlign: 'center',
   },
   postButton: {
-    backgroundColor: '#2D5016',
+    backgroundColor: Colors.primary,
     borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     marginLeft: 8,
+    minWidth: 80,
+    alignItems: 'center',
   },
   postButtonDisabled: {
     backgroundColor: '#ccc',

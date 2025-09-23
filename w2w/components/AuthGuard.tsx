@@ -4,6 +4,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { ThemedView } from '@/components/ThemedView';
 import { ThemedText } from '@/components/ThemedText';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -14,7 +15,7 @@ interface AuthGuardProps {
 export function AuthGuard({ 
   children, 
   fallback,
-  redirectTo = '/(login)/index' 
+  redirectTo = '/(login)' 
 }: AuthGuardProps) {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
@@ -23,7 +24,21 @@ export function AuthGuard({
     console.log('[AuthGuard] 🔍 Auth state check:', { isLoading, isAuthenticated });
     if (!isLoading && !isAuthenticated) {
       console.log('[AuthGuard] 🚫 User not authenticated, redirecting to login');
-      router.replace(redirectTo);
+      // Use a small delay to ensure logout process is complete
+      setTimeout(() => {
+        try {
+          console.log('[AuthGuard] Attempting to navigate to login page');
+          router.push('/(login)');
+        } catch (error) {
+          console.log('[AuthGuard] Router push failed, trying replace:', error);
+          try {
+            router.replace('/(login)');
+          } catch (replaceError) {
+            console.log('[AuthGuard] Replace also failed, trying root redirect:', replaceError);
+            router.push('/');
+          }
+        }
+      }, 200);
     }
   }, [isAuthenticated, isLoading, router, redirectTo]);
 
@@ -31,8 +46,7 @@ export function AuthGuard({
   if (isLoading) {
     return fallback || (
       <ThemedView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-        <ThemedText style={{ marginTop: 16 }}>Checking authentication...</ThemedText>
+        <LogoLoadingAnimation size={120} showBackground={true} />
       </ThemedView>
     );
   }
@@ -41,8 +55,7 @@ export function AuthGuard({
   if (!isAuthenticated) {
     return fallback || (
       <ThemedView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-        <ThemedText style={{ marginTop: 16 }}>Redirecting to login...</ThemedText>
+        <LogoLoadingAnimation size={120} showBackground={true} />
       </ThemedView>
     );
   }

@@ -9,10 +9,9 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
-import { ThemedText } from '@/components/ThemedText';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const { width, height } = Dimensions.get('window');
@@ -44,17 +43,14 @@ export default function EducationalContentModal({
   loading,
   materialName,
 }: EducationalContentModalProps) {
-  const colorScheme = useColorScheme() ?? 'light';
-  const colors = Colors[colorScheme];
+  // Always use light theme
+  const colors = Colors.light;
 
   const renderContent = () => {
     if (loading) {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <ThemedText style={styles.loadingText}>
-            Generating educational content about {materialName}...
-          </ThemedText>
+          <LogoLoadingAnimation size={100} showBackground={false} />
         </View>
       );
     }

@@ -1,18 +1,18 @@
 import { Image } from 'expo-image';
-import { StyleSheet, View, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, TouchableOpacity, Alert, ScrollView, Platform } from 'react-native';
 import { Pressable } from 'react-native';
-import { useState, useEffect } from 'react';
-import { router, useLocalSearchParams } from 'expo-router';
+import React, { useState, useEffect } from 'react';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import SettingsSidebar from '@/components/SettingsSidebar';
+import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { useLocation, LocationData } from '@/hooks/useLocation';
 import { useClimate } from '@/hooks/useClimate';
 import { populateTropicalDisposalTable, getUniqueMaterialsCount, getTropicalDisposalCount } from '@/lib/adminService';
@@ -46,6 +46,7 @@ interface ProjectData {
   imageUrl?: string;
   difficulty: string;
   materialsNeeded: string[];
+  is_completed?: boolean;
 }
 
 interface CurrentProjectData {
@@ -58,7 +59,6 @@ interface CurrentProjectData {
 }
 
 export default function HomeScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
   const params = useLocalSearchParams();
   const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -110,12 +110,42 @@ export default function HomeScreen() {
     }
   };
 
-  // Fetch projects for a material
-  const fetchMaterialProjects = async (materialId: string) => {
+  // Fetch projects for a material with completion status
+  const fetchMaterialProjects = async (materialId: string, userId?: string) => {
     try {
       const response = await fetch(`${API_BASE_URL}/projects/${materialId}`);
       if (!response.ok) throw new Error('Failed to fetch projects');
-      return await response.json();
+      const projects = await response.json();
+      
+      // If userId is provided, fetch completion status for each project
+      if (userId) {
+        const projectsWithCompletion = await Promise.all(
+          projects.map(async (project: any) => {
+            try {
+              const progressResponse = await fetch(`${API_BASE_URL}/user/${userId}/project/${project.id}/progress`);
+              if (progressResponse.ok) {
+                const progressData = await progressResponse.json();
+                return {
+                  ...project,
+                  is_completed: progressData.isCompleted || false
+                };
+              }
+            } catch (error) {
+              console.log(`No progress found for project ${project.id}`);
+            }
+            return {
+              ...project,
+              is_completed: false
+            };
+          })
+        );
+        return projectsWithCompletion;
+      }
+      
+      return projects.map((project: any) => ({
+        ...project,
+        is_completed: false
+      }));
     } catch (error) {
       console.error('Error fetching projects:', error);
       return [];
@@ -309,14 +339,55 @@ export default function HomeScreen() {
     }
   };
 
-  // Refresh user profile data (name, title, progress)
+  // Track project completion and update progress
+  const trackProjectCompletion = async (projectId: string) => {
+    try {
+      if (userId) {
+        console.log('🎯 Tracking project completion for:', projectId);
+        
+        // Update quest progress for recycling project actions
+        const questResults = await questService.trackRecyclingProjectAction(userId);
+        
+        // Check for completed quests and show notifications
+        await questService.checkCompletedQuests(questResults);
+        
+        // Refresh user profile to update progress
+        await refreshUserProfile();
+        
+        console.log('✅ Project completion tracked successfully');
+      }
+    } catch (error) {
+      console.error('❌ Error tracking project completion:', error);
+    }
+  };
+
+  // Enhanced progress calculation that includes quest completion
+  const calculateProgressPercentage = () => {
+    if (!userData) return 0;
+    
+    // Base progress from user data
+    const baseProgress = userData.progress || 0;
+    
+    // Additional progress from completed projects
+    const completedProjects = userProjects.filter(project => project.is_completed);
+    const projectBonus = completedProjects.length * 5; // 5 points per completed project
+    
+    // Additional progress from materials scanned
+    const materialBonus = userMaterials.length * 2; // 2 points per material
+    
+    const totalProgress = baseProgress + projectBonus + materialBonus;
+    
+    // Cap at 100%
+    return Math.min(totalProgress, 100);
+  };
   const refreshUserProfile = async () => {
     try {
       if (userId) {
         console.log('🔄 Refreshing user profile data...');
-        const [userDataResponse, profileInfo] = await Promise.all([
+        const [userDataResponse, profileInfo, questProgress] = await Promise.all([
           fetchUserProfileData(userId),
-          checkProfileCompletion(userId)
+          checkProfileCompletion(userId),
+          questService.getUserQuestProgress(userId)
         ]);
         
         if (userDataResponse) {
@@ -332,6 +403,17 @@ export default function HomeScreen() {
           const initializedData = await initializeUserProfile(userId);
           if (initializedData) {
             setUserData(initializedData);
+          }
+        }
+
+        // Update quest progress and show notifications for completed quests
+        if (questProgress && questProgress.length > 0) {
+          console.log('🎯 Quest progress updated:', questProgress);
+          // Check for newly completed quests and show notifications
+          const completedQuests = questProgress.filter(quest => quest.is_completed);
+          if (completedQuests.length > 0) {
+            console.log('🎉 Completed quests detected:', completedQuests);
+            // You can add a notification system here
           }
         }
         
@@ -524,7 +606,7 @@ export default function HomeScreen() {
 
           // Fetch projects for the first few materials
           const projectPromises = validMaterials.slice(0, 3).map(material => 
-            fetchMaterialProjects(material.id)
+            fetchMaterialProjects(material.id, userId)
           );
           
           const projectResults = await Promise.all(projectPromises);
@@ -559,18 +641,36 @@ export default function HomeScreen() {
     handleRefresh();
   }, [params.refresh, userId]);
 
+  // Refresh data when screen comes into focus (e.g., returning from project detail)
+  useFocusEffect(
+    React.useCallback(() => {
+      const refreshData = async () => {
+        if (userId) {
+          try {
+            console.log('🔄 Screen focused, refreshing user data...');
+            await refreshUserProfile();
+            await refreshCurrentProject(userId);
+          } catch (error) {
+            console.error('Error refreshing data on focus:', error);
+          }
+        }
+      };
+
+      refreshData();
+    }, [userId])
+  );
+
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: Colors[colorScheme].background }]}>
-        <ActivityIndicator size="large" color={Colors[colorScheme].icon} />
-        <ThemedText style={styles.loadingText}>Loading your materials...</ThemedText>
+      <View style={styles.loadingContainer}>
+        <LogoLoadingAnimation size={120} showBackground={true} />
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={[styles.errorContainer, { backgroundColor: Colors[colorScheme].background }]}>
+      <View style={styles.errorContainer}>
         <ThemedText style={styles.errorText}>{error}</ThemedText>
       </View>
     );
@@ -583,33 +683,102 @@ export default function HomeScreen() {
         onClose={() => setSidebarVisible(false)} 
       />
       <View
-        style={{ flex: 1, padding: 16, backgroundColor: Colors[colorScheme].background }}
+        style={{ flex: 1, backgroundColor: Colors.background }}
       >
-        <View style={styles.headerRow}>
-          {/* <ThemedView style={styles.titleContainer}>
-            <ThemedText type="title">Waste to Worth</ThemedText>
-          </ThemedView> */}
+        <ScrollView 
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16 }}
+          showsVerticalScrollIndicator={false}
+          bounces={true}
+        >
+          {/* Header */}
+          <View style={styles.headerRow}>
+            <ThemedView style={styles.titleContainer}>
+              <ThemedText type="title">Home</ThemedText>
+            </ThemedView>
+            <View style={styles.headerActions}>
+              <Pressable
+                style={styles.settingsButton}
+                onPress={() => setSidebarVisible(true)}
+                accessibilityLabel="Settings"
+              >
+                <MaterialIcons name="settings" size={24} color={Colors.icon} />
+              </Pressable>
+            </View>
+          </View>
+          <View style={styles.sectionsContainer}>
+          {/* Profile Summary Section (Top) */}
+          <ThemedView style={[styles.section, { borderTopLeftRadius: 12, borderTopRightRadius: 12 }]}>
+            <View style={styles.userInfo}>
+              <Pressable 
+                style={styles.userImageContainer}
+                onPress={async () => {
+                  if (userId) {
+                    await loadProfileImage(userId);
+                  }
+                }}
+              >
+                <Image
+                  source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
+                  style={styles.userImage}
+                  resizeMode="cover"
+                />
+                {profileImageUrl && (
+                  <View style={styles.imageSourceIndicator}>
+                    <MaterialIcons 
+                      name={profileImageUrl.startsWith('http') ? 'cloud-done' : 'phone-android'} 
+                      size={10} 
+                      color="white" 
+                    />
+                  </View>
+                )}
+              </Pressable>
+              <View style={styles.userDetails}>
+                <ThemedText style={styles.userName}>
+                  {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : userData?.name || userName || 'User'}
+                </ThemedText>
+                <ThemedText style={styles.userLevel}>{userData?.achievement_title || 'Recycling Beginner'}</ThemedText>
+              </View>
+            </View>
+            
+            <View style={styles.statsGrid}>
+              <View style={styles.statItem}>
+                <ThemedText style={styles.statValue}>{userData?.progress || 0}</ThemedText>
+                <ThemedText style={styles.statLabel}>Points</ThemedText>
+              </View>
+              <View style={styles.statItem}>
+                <ThemedText style={styles.statValue}>{userMaterials.length}</ThemedText>
+                <ThemedText style={styles.statLabel}>Materials</ThemedText>
+              </View>
+              <View style={styles.statItem}>
+                <ThemedText style={styles.statValue}>{userProjects.filter(p => p.is_completed).length}</ThemedText>
+                <ThemedText style={styles.statLabel}>Completed</ThemedText>
+              </View>
+            </View>
+
+            <View style={styles.levelProgressContainer}>
+              <ThemedText style={styles.levelProgressText}>Level Progress</ThemedText>
+              <View style={styles.progressBarBackground}>
+                <View style={[styles.progressBarFill, { width: `${calculateProgressPercentage()}%` }]} />
+              </View>
+              <View style={styles.progressInfo}>
+                <ThemedText style={styles.levelProgressPercent}>{calculateProgressPercentage()}%</ThemedText>
+                <ThemedText style={styles.levelProgressDetails}>
+                  {userMaterials.length} materials scanned • {userProjects.filter(p => p.is_completed).length} projects completed
+                </ThemedText>
+              </View>
+            </View>
+          </ThemedView>
+          <View style={styles.divider} />
           
-        </View>
-        <View style={styles.sectionsContainer}>
-          {/* Current Project Section (Top) */}
+          {/* Current Project Section */}
           {currentProject && currentProject.project_name && (
             <>
               <ThemedView
-                style={[styles.section, { borderTopLeftRadius: 12, borderTopRightRadius: 12 }]}
-                lightColor={Colors.light.background}
-                darkColor={Colors.dark.background}
+                style={styles.section}
               >
                 <Pressable onPress={handleTitleTap}>
-                  <ThemedText type="subtitle">Current Project 
-                    <Pressable
-                      style={styles.settingsButton}
-                      onPress={() => setSidebarVisible(true)}
-                      accessibilityLabel="Settings"
-                    >
-                      <MaterialIcons name="settings" size={24} color={Colors[colorScheme].icon} />
-                    </Pressable>
-                  </ThemedText>
+                  <ThemedText type="subtitle">Current Project</ThemedText>
                 </Pressable>
                 
                 <TouchableOpacity 
@@ -632,9 +801,12 @@ export default function HomeScreen() {
                     <ThemedText style={styles.currentProjectSteps}>
                       {currentProject.steps?.length || 0} steps to complete
                     </ThemedText>
-                    <ThemedText style={styles.tapToViewText}>
-                      Tap to view details →
-                    </ThemedText>
+                    <View style={styles.tapToViewContainer}>
+                      <ThemedText style={styles.tapToViewText}>
+                        Tap to view details
+                      </ThemedText>
+                      <MaterialIcons name="arrow-forward" size={16} color="#007AFF" />
+                    </View>
                   </View>
                 </TouchableOpacity>
               </ThemedView>
@@ -644,9 +816,7 @@ export default function HomeScreen() {
           
           {/* Materials Section */}
           <ThemedView
-            style={[styles.section, { flex: 1, borderTopLeftRadius: currentProject ? 0 : 12, borderTopRightRadius: currentProject ? 0 : 12 }]}
-            lightColor={Colors.light.background}
-            darkColor={Colors.dark.background}
+            style={[styles.section, { flex: 1 }]}
           >
             <View style={styles.materialsHeader}>
               <Pressable onPress={handleTitleTap}>
@@ -657,8 +827,10 @@ export default function HomeScreen() {
                   style={styles.showMoreButton}
                   onPress={() => router.push('/history')}
                 >
-                  <ThemedText style={styles.showMoreText}>Show More</ThemedText>
-                  <MaterialIcons name="arrow-forward" size={16} color="#007AFF" />
+                  <View style={styles.showMoreContainer}>
+                    <ThemedText style={styles.showMoreText}>Show More</ThemedText>
+                    <MaterialIcons name="chevron-right" size={18} color="#007AFF" />
+                  </View>
                 </Pressable>
               )}
             </View>
@@ -687,9 +859,12 @@ export default function HomeScreen() {
                         {material.Traits.slice(0, 3).join(', ')}
                         {material.Traits.length > 3 ? '...' : ''}
                       </ThemedText>
-                      <ThemedText style={styles.tapToViewText}>
-                        Tap to view details →
-                      </ThemedText>
+                      <View style={styles.tapToViewContainer}>
+                        <ThemedText style={styles.tapToViewText}>
+                          Tap to view details
+                        </ThemedText>
+                        <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                      </View>
                     </View>
                   </TouchableOpacity>
                 ))
@@ -701,98 +876,14 @@ export default function HomeScreen() {
               )}
             </View>
           </ThemedView>
-          {/* Profile Section (Bottom) */}
-          <ThemedView
-            style={[styles.section, { flex: 1, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }]}
-            lightColor={Colors.light.background}
-            darkColor={Colors.dark.background}
-          >
-            <View style={styles.profileSectionHeader}>
-              <ThemedText type="subtitle">Profile</ThemedText>
-              <View style={styles.profileHeaderActions}>
-                {(!userProfile?.firstName || !userProfile?.lastName || !userData?.achievement_title || userData?.progress === undefined) && (
-                  <Pressable
-                    style={styles.initializeButton}
-                    onPress={async () => {
-                      if (userId) {
-                        await initializeUserProfile(userId);
-                        await refreshUserProfile();
-                      }
-                    }}
-                  >
-                    <MaterialIcons name="add-circle" size={16} color="#007AFF" />
-                  </Pressable>
-                )}
-                <MaterialIcons name="refresh" size={16} color="#666" />
-              </View>
-            </View>
-            <Pressable 
-              style={styles.profileCard}
-              onPress={refreshUserProfile}
-            >
-              <View style={styles.profileHeader}>
-                <Pressable 
-                  style={styles.profileImageContainer}
-                  onPress={async () => {
-                    if (userId) {
-                      await loadProfileImage(userId);
-                    }
-                  }}
-                >
-                  <Image
-                    source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
-                    style={styles.profileImage}
-                    resizeMode="cover"
-                  />
-                </Pressable>
-                <View style={styles.profileInfo}>
-                  <ThemedText type="defaultSemiBold" style={styles.profileName}>
-                    {userProfile?.firstName && userProfile?.lastName 
-                      ? `${userProfile.firstName} ${userProfile.lastName}`
-                      : userData?.name || userName || 'User'
-                    }
-                  </ThemedText>
-                  <ThemedText style={styles.achievementTitle}>
-                    {userData?.achievement_title || 'Recycling Beginner'}
-                  </ThemedText>
-                  {(!userProfile?.firstName || !userProfile?.lastName || !userData?.achievement_title || userData?.progress === undefined) && (
-                    <ThemedText style={styles.profileHint}>
-                      Tap the + icon to initialize your profile
-                    </ThemedText>
-                  )}
-                </View>
-              </View>
-              <View style={styles.progressSection}>
-                <View style={styles.progressBarContainer}>
-                  <View style={styles.progressBar}>
-                    <View 
-                      style={[
-                        styles.progressFill, 
-                        { width: `${userData?.progress || 0}%` }
-                      ]} 
-                    />
-                  </View>
-                  <ThemedText style={styles.progressText}>
-                    {userData?.progress || 0}%
-                  </ThemedText>
-                </View>
-              </View>
-            </Pressable>
-          </ThemedView>
         </View>
+        </ScrollView>
       </View>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-    marginTop: 50,
-  },
   reactLogo: {
     height: 178,
     width: 290,
@@ -801,13 +892,21 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   sectionsContainer: {
-    flex: 1,
     flexDirection: 'column',
-    minHeight: 0,
   },
   section: {
-    padding: 16,
-    justifyContent: 'flex-start',
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#00630F',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    ...(Platform.OS === 'web' && { backdropFilter: 'blur(10px)' }),
   },
   divider: {
     height: 1,
@@ -822,12 +921,19 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   card: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 12,
+    padding: 16,
     alignItems: 'center',
     width: 160,
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#00630F',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   cardImage: {
     width: 80,
@@ -837,11 +943,13 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     marginBottom: 4,
+    color: '#2D5016',
+    fontWeight: '600',
   },
   cardDescription: {
     fontSize: 14,
     textAlign: 'center',
-    color: '#555',
+    color: '#4A6741',
   },
   difficultyText: {
     fontSize: 12,
@@ -857,19 +965,20 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 16,
-    color: '#666',
+    color: '#4A6741',
     textAlign: 'center',
     marginBottom: 8,
   },
   emptyStateSubtext: {
     fontSize: 14,
-    color: '#999',
+    color: '#4A6741',
     textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: Colors.background,
   },
   loadingText: {
     marginTop: 16,
@@ -881,6 +990,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: Colors.background,
   },
   errorText: {
     fontSize: 16,
@@ -891,7 +1001,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 16,
+  },
+  titleContainer: {
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  refreshButton: {
+    padding: 8,
+    marginRight: 8,
   },
   settingsButton: {
     padding: 8,
@@ -947,11 +1070,16 @@ const styles = StyleSheet.create({
   },
   currentProjectCard: {
     flexDirection: 'row',
-    backgroundColor: '#f8f8f8',
-    borderRadius: 12,
-    padding: 32,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 16,
+    padding: 24,
     alignItems: 'center',
     minHeight: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   currentProjectImage: {
     width: 200,
@@ -966,15 +1094,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 8,
+    color: '#2D5016',
   },
   currentProjectMaterial: {
     fontSize: 14,
-    color: '#666',
+    color: '#4A6741',
     marginBottom: 4,
   },
   currentProjectSteps: {
     fontSize: 12,
-    color: '#888',
+    color: '#4A6741',
     fontStyle: 'italic',
   },
   profileSectionHeader: {
@@ -992,10 +1121,17 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   profileCard: {
-    backgroundColor: '#f8f8f8',
-    borderRadius: 12,
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 16,
     padding: 20,
     opacity: 1,
+    borderWidth: 1,
+    borderColor: '#00630F',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   profileHeader: {
     flexDirection: 'row',
@@ -1060,13 +1196,13 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     borderRadius: 6,
   },
   progressText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4CAF50',
+    color: Colors.primary,
     minWidth: 40,
   },
   materialsHeader: {
@@ -1076,11 +1212,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   showMoreButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 122, 255, 0.3)',
   },
   showMoreText: {
     fontSize: 14,
@@ -1135,10 +1272,92 @@ const styles = StyleSheet.create({
     color: '#555',
     lineHeight: 16,
   },
+  tapToViewContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    borderRadius: 12,
+    gap: 4,
+  },
   tapToViewText: {
     fontSize: 12,
     color: '#007AFF',
+    fontWeight: '600',
+  },
+  showMoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  // Profile Summary Styles (from Quests screen)
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  userDetails: {
+    flex: 1,
+  },
+  userLevel: {
+    fontSize: 16,
+    color: '#4A6741',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 20,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: Colors.primary,
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#4A6741',
+    marginTop: 4,
+  },
+  levelProgressContainer: {
+    marginTop: 10,
+  },
+  levelProgressText: {
+    fontSize: 14,
+    color: '#4A6741',
+    marginBottom: 8,
+  },
+  progressBarBackground: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: Colors.primary,
+    borderRadius: 4,
+  },
+  levelProgressPercent: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  progressInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginTop: 8,
-    fontWeight: '500',
+  },
+  levelProgressDetails: {
+    fontSize: 11,
+    color: '#888',
+    fontStyle: 'italic',
   },
 });
