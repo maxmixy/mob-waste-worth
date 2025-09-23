@@ -169,18 +169,28 @@ export async function logoutUser(): Promise<void> {
     console.log('Starting logout process...');
     
     // Import Firebase auth dynamically to avoid circular imports
-    const firebaseModule = await import('@/lib/firebase');
+    const firebaseModule = await import('@/lib/firebaseConfig');
     const authModule = await import('firebase/auth');
     
     console.log('Firebase modules imported successfully');
     
-    // Sign out from Firebase
-    if (firebaseModule.auth) {
+    // Check current user and provider before logout
+    if (firebaseModule.auth && firebaseModule.auth.currentUser) {
+      const currentUser = firebaseModule.auth.currentUser;
+      console.log('Current user found:', currentUser.uid);
+      
+      // Check if user signed in with Google
+      const isGoogleUser = currentUser.providerData.some(provider => provider.providerId === 'google.com');
+      if (isGoogleUser) {
+        console.log('Google user detected - signing out from Firebase');
+      }
+      
+      // Sign out from Firebase
       console.log('Signing out from Firebase...');
       await authModule.signOut(firebaseModule.auth);
       console.log('Firebase signout successful');
     } else {
-      console.log('No Firebase auth instance found');
+      console.log('No current user found in Firebase auth');
     }
     
     // Clear local storage
