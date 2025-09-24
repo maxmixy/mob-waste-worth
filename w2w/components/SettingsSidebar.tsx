@@ -9,6 +9,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocation } from '@/hooks/useLocation';
 import { useClimate } from '@/hooks/useClimate';
+import { clearTabGuidanceStatus } from '@/lib/onboardingStorage';
 
 interface SettingsSidebarProps {
   visible: boolean;
@@ -88,6 +89,22 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
       setLoading(false);
     }
   };
+
+  const handleResetTabGuide = async () => {
+    try {
+      await clearTabGuidanceStatus();
+      onClose();
+      Alert.alert(
+        'Tab Guide Reset', 
+        'The tab guide will be shown again when you restart the app.',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('Error resetting tab guide:', error);
+      Alert.alert('Error', 'Failed to reset tab guide. Please try again.');
+    }
+  };
+
 
 
   const handleProfile = () => {
@@ -287,6 +304,15 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
           >
             <MaterialIcons name="privacy-tip" size={24} color={Colors.primary} />
             <ThemedText style={styles.menuText}>Privacy</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={handleResetTabGuide}
+          >
+            <MaterialIcons name="help-outline" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Show Tab Guide Again</ThemedText>
             <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
           </TouchableOpacity>
         </ThemedView>

@@ -1,12 +1,14 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
-import { Platform, View } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { Platform, View, Text, TouchableOpacity } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { AuthGuard } from '@/components/AuthGuard';
+import TabGuide from '@/components/TabGuide';
+import { getTabGuidanceStatus } from '@/lib/onboardingStorage';
 
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
@@ -15,6 +17,41 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 // This file is the main layout for the tabs in the app.
 
 export default function TabLayout() {
+  // Temporarily set to true for testing - change back to false when debugging is complete
+  const [showTabGuide, setShowTabGuide] = useState(false);
+
+  useEffect(() => {
+    const checkTabGuidance = async () => {
+      try {
+        console.log('[TabLayout] 🔍 Checking tab guidance status...');
+        const hasSeenGuidance = await getTabGuidanceStatus();
+        console.log('[TabLayout] 📊 Tab guidance status:', hasSeenGuidance);
+        console.log('[TabLayout] 🔍 Current showTabGuide state:', showTabGuide);
+        
+        if (!hasSeenGuidance) {
+          console.log('[TabLayout] 🎯 First time user detected, showing guide in 1 second...');
+          // Show guide after a short delay to ensure tabs are rendered
+          setTimeout(() => {
+            console.log('[TabLayout] ✨ Setting showTabGuide to true!');
+            setShowTabGuide(true);
+            console.log('[TabLayout] 🔍 showTabGuide state after setting:', true);
+          }, 1000);
+        } else {
+          console.log('[TabLayout] ✅ User has already seen the guide - NOT showing guide');
+        }
+      } catch (error) {
+        console.error('[TabLayout] ❌ Error checking tab guidance status:', error);
+      }
+    };
+
+    checkTabGuidance();
+  }, []);
+
+
+  const handleTabGuideComplete = () => {
+    setShowTabGuide(false);
+  };
+
   return (
     <AuthGuard>
       <Tabs
@@ -103,6 +140,12 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    
+    <TabGuide 
+      visible={showTabGuide} 
+      onComplete={handleTabGuideComplete} 
+    />
+    
     </AuthGuard>
   );
 }

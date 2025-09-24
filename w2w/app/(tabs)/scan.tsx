@@ -445,7 +445,19 @@ const styles = StyleSheet.create({
     // Removed blur styling - now transparent
   },
   instructionsContent: {
-    padding: 16,
+    padding: 15,
+    paddingLeft: 40,
+    paddingBottom: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    borderRadius: 40,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 5,
   },
   captureButtonInInstructions: {
     alignItems: 'center',
