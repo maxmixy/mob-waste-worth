@@ -844,6 +844,45 @@ def get_user_materials(user_id):
         print(f"Error fetching user materials: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/user/<user_id>/materials/<material_id>', methods=['DELETE'])
+def delete_user_material(user_id, material_id):
+    """Remove a material ID from a user's scan history"""
+    try:
+        if db is None:
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Get user document
+        user_doc = db.collection('User_collection').document(user_id).get()
+        
+        if not user_doc.exists:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_doc.to_dict()
+        materials = user_data.get('Materials', [])
+        
+        # Check if material exists in user's materials
+        if material_id not in materials:
+            return jsonify({'error': 'Material not found in user history'}), 404
+        
+        # Remove the material from the array
+        materials.remove(material_id)
+        
+        # Update the user document
+        db.collection('User_collection').document(user_id).update({
+            'Materials': materials
+        })
+        
+        print(f"🗑️ Removed material {material_id} from user {user_id}'s history")
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Material removed from scan history successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error deleting user material: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/user/<user_id>/location', methods=['POST'])
 def update_user_location(user_id):
     """Update user's location data"""
@@ -1511,6 +1550,88 @@ def posts():
             print(f"Error creating post: {e}")
             return jsonify({'error': str(e)}), 500
 
+@app.route('/posts/<post_id>', methods=['PUT', 'DELETE'])
+def manage_post(post_id):
+    """Update or delete a post"""
+    print(f"🔧 manage_post called with method: {request.method}, post_id: {post_id}")
+    try:
+        if db is None:
+            print("❌ Database not initialized")
+            return jsonify({'error': 'Database not initialized'}), 500
+        
+        # Check if post exists
+        post_ref = db.collection('Posts').document(post_id)
+        post_doc = post_ref.get()
+        
+        if not post_doc.exists:
+            print(f"❌ Post {post_id} not found")
+            return jsonify({'error': 'Post not found'}), 404
+        
+        post_data = post_doc.to_dict()
+        print(f"✅ Post {post_id} found, proceeding with {request.method}")
+        
+        if request.method == 'PUT':
+            # Update post
+            data = request.get_json()
+            content_text = data.get('content_text')
+            updated_at = data.get('updated_at')
+            
+            if not content_text:
+                return jsonify({'error': 'content_text is required'}), 400
+            
+            # Update the post
+            update_data = {
+                'content_text': content_text,
+                'updated_at': datetime.utcnow()
+            }
+            
+            post_ref.update(update_data)
+            print(f"Updated post {post_id} with new content")
+            
+            return jsonify({
+                'success': True, 
+                'message': 'Post updated successfully',
+                'updated_at': update_data['updated_at'].isoformat()
+            })
+            
+        elif request.method == 'DELETE':
+            print(f"🗑️ DELETE request received for post {post_id}")
+            
+            # Delete post and all related data
+            # Delete post media
+            media_docs = db.collection('Post_Media').where('post_id', '==', post_id).stream()
+            media_count = 0
+            for media_doc in media_docs:
+                media_doc.reference.delete()
+                media_count += 1
+            print(f"🗑️ Deleted {media_count} media items for post {post_id}")
+            
+            # Delete post likes
+            likes_doc = db.collection('Post_Likes').document(post_id)
+            if likes_doc.get().exists:
+                likes_doc.delete()
+                print(f"🗑️ Deleted likes for post {post_id}")
+            else:
+                print(f"🗑️ No likes document found for post {post_id}")
+            
+            # Delete post comments
+            comments_docs = db.collection('Post_Comments').where('post_id', '==', post_id).stream()
+            comment_count = 0
+            for comment_doc in comments_docs:
+                comment_doc.reference.delete()
+                comment_count += 1
+            print(f"🗑️ Deleted {comment_count} comments for post {post_id}")
+            
+            # Delete the post itself
+            post_ref.delete()
+            print(f"🗑️ Deleted post {post_id} and all related data")
+            
+            return jsonify({'success': True, 'message': 'Post deleted successfully'})
+            
+    except Exception as e:
+        print(f"Error managing post {post_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/posts/<post_id>/like', methods=['POST'])
 def like_post(post_id):
     """Toggle like for a post"""
@@ -1553,8 +1674,6 @@ def like_post(post_id):
     except Exception as e:
         print(f"Error liking post: {e}")
         return jsonify({"error": str(e)}), 500
-
-from datetime import datetime
 
 @app.route('/posts/<post_id>/comment', methods=['POST'])
 def comment_post(post_id):
@@ -1678,7 +1797,7 @@ def handle_profile(user_id):
             profile_data = {
                 'firstName': user_data.get('firstName'),
                 'lastName': user_data.get('lastName'),
-                'age': user_data.get('age'),
+                'birthdate': user_data.get('birthdate'),
                 'location': user_data.get('location'),
                 'interests': user_data.get('interests'),
                 'profileCreatedAt': user_data.get('profileCreatedAt')
@@ -1702,18 +1821,18 @@ def handle_profile(user_id):
             data = request.get_json()
             
             # Validate required fields
-            required_fields = ['firstName', 'lastName', 'age', 'profileCompleted']
+            required_fields = ['firstName', 'lastName', 'birthdate', 'profileCompleted']
             for field in required_fields:
                 if field not in data:
                     return jsonify({'error': f'Missing required field: {field}'}), 400
             
-            # Validate age
+            # Validate birthdate
             try:
-                age = int(data['age'])
-                if age < 18 or age > 120:
-                    return jsonify({'error': 'Age must be between 18 and 120'}), 400
+                birthdate = data['birthdate']
+                if not birthdate:
+                    return jsonify({'error': 'Birthdate is required'}), 400
             except (ValueError, TypeError):
-                return jsonify({'error': 'Age must be a valid number'}), 400
+                return jsonify({'error': 'Birthdate must be a valid date'}), 400
             
             # Get user document
             user_doc = db.collection('User_collection').document(user_id).get()
@@ -1723,7 +1842,7 @@ def handle_profile(user_id):
                 update_data = {
                     'firstName': data['firstName'],
                     'lastName': data['lastName'],
-                    'age': age,
+                    'birthdate': birthdate,
                     'location': data.get('location', ''),
                     'interests': data.get('interests', ''),
                     'profileCompleted': data['profileCompleted'],
@@ -1736,7 +1855,7 @@ def handle_profile(user_id):
                 user_data = {
                     'firstName': data['firstName'],
                     'lastName': data['lastName'],
-                    'age': age,
+                    'birthdate': birthdate,
                     'location': data.get('location', ''),
                     'interests': data.get('interests', ''),
                     'profileCompleted': data['profileCompleted'],
@@ -2548,6 +2667,9 @@ def update_user_quest_progress(user_id):
                 is_completed = new_progress >= target_count
                 points_earned = points if is_completed and current_progress < target_count else 0
                 
+                # Debug logging
+                print(f"Quest {quest_id}: current_progress={current_progress}, new_progress={new_progress}, target_count={target_count}, is_completed={is_completed}, points_earned={points_earned}")
+                
                 # Update progress
                 progress_doc.reference.update({
                     'current_progress': new_progress,
@@ -2562,6 +2684,7 @@ def update_user_quest_progress(user_id):
                     'progress': new_progress,
                     'is_completed': is_completed,
                     'points_earned': points_earned,
+                    'quest_title': quest_data.get('title', 'Quest'),
                     'message': 'Quest completed!' if is_completed else 'Progress updated'
                 })
             else:
@@ -2577,6 +2700,9 @@ def update_user_quest_progress(user_id):
                 new_progress = progress_increment
                 is_completed = new_progress >= target_count
                 points_earned = points if is_completed else 0
+                
+                # Debug logging for new quest progress
+                print(f"New quest {quest_id}: new_progress={new_progress}, target_count={target_count}, is_completed={is_completed}, points_earned={points_earned}")
                 
                 # Create new progress document
                 progress_ref = db.collection('User_Quest_Progress').document()
@@ -2597,6 +2723,7 @@ def update_user_quest_progress(user_id):
                     'progress': new_progress,
                     'is_completed': is_completed,
                     'points_earned': points_earned,
+                    'quest_title': quest_data.get('title', 'Quest'),
                     'message': 'Quest completed!' if is_completed else 'Progress updated'
                 })
             else:
