@@ -453,9 +453,12 @@ export default function ProfileSettingsScreen() {
           </View>
 
           <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>Age</ThemedText>
+            <ThemedText style={styles.infoLabel}>Birthdate</ThemedText>
             <ThemedText style={styles.infoValue}>
-              {profileData?.age ? `${profileData.age} years old` : 'Not set'}
+              {profileData?.birthdate ? 
+                new Date(profileData.birthdate).toLocaleDateString() : 
+                'Not set'
+              }
             </ThemedText>
           </View>
 
@@ -502,20 +505,6 @@ export default function ProfileSettingsScreen() {
           </View>
         </ThemedView>
 
-        {/* Actions */}
-        <ThemedView style={styles.actionsSection}>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="security" size={24} color="#00630F" />
-            <ThemedText style={styles.actionButtonText}>Privacy & Security</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={Colors.icon} />
-          </Pressable>
-
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="notifications" size={24} color="#00630F" />
-            <ThemedText style={styles.actionButtonText}>Notification Settings</ThemedText>
-            <MaterialIcons name="chevron-right" size={24} color={Colors.icon} />
-          </Pressable>
-        </ThemedView>
       </ScrollView>
 
       {/* Custom Action Sheet for Web */}

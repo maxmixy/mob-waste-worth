@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, TouchableOpacity, StyleSheet, Alert, View, ScrollView, Platform } from 'react-native';
+import { Modal, TouchableOpacity, StyleSheet, Alert, View, ScrollView, Platform, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import { getUserId, logoutUser, checkProfileCompletion } from '@/lib/user';
+import { ImageService } from '@/lib/imageService';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocation } from '@/hooks/useLocation';
 import { useClimate } from '@/hooks/useClimate';
+import { clearTabGuidanceStatus } from '@/lib/onboardingStorage';
 
 interface SettingsSidebarProps {
   visible: boolean;
@@ -19,6 +21,7 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
   const router = useRouter();
   const [userName, setUserName] = useState('User');
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   
   // Location and climate functionality
@@ -60,10 +63,24 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
         } else {
           setUserName('User');
         }
+        
+        // Load profile image
+        console.log('Loading profile image for user in sidebar:', userId);
+        const imageResponse = await ImageService.getProfileImage(userId);
+        console.log('Sidebar image response:', imageResponse);
+        
+        if (imageResponse.success && imageResponse.hasImage && imageResponse.imageUrl) {
+          console.log('Setting sidebar profile image URL:', imageResponse.imageUrl);
+          setProfileImageUrl(imageResponse.imageUrl);
+        } else {
+          console.log('No profile image found in sidebar or error:', imageResponse.error || imageResponse.message);
+          setProfileImageUrl(null);
+        }
       }
     } catch (error) {
       console.error('Error loading user info:', error);
       setUserName('User');
+      setProfileImageUrl(null);
     }
   };
 
@@ -88,6 +105,19 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
       setLoading(false);
     }
   };
+
+  const handleShowTabGuide = async () => {
+    try {
+      await clearTabGuidanceStatus();
+      onClose();
+      // The tab guide will automatically show when the user navigates back to the tabs
+      // since the guidance status has been cleared
+    } catch (error) {
+      console.error('Error showing tab guide:', error);
+      Alert.alert('Error', 'Failed to show tab guide. Please try again.');
+    }
+  };
+
 
 
   const handleProfile = () => {
@@ -140,11 +170,19 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
             {/* User Profile Section */}
             <ThemedView style={styles.profileSection}>
               <View style={styles.userImageContainer}>
-                <Image
-                  source={getProfilePictureSource(userProfile?.profilePicture)}
-                  style={styles.userImage}
-                  resizeMode="cover"
-                />
+                {profileImageUrl ? (
+                  <Image
+                    source={{ uri: profileImageUrl }}
+                    style={styles.userImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Image
+                    source={getProfilePictureSource(userProfile?.profilePicture)}
+                    style={styles.userImage}
+                    resizeMode="cover"
+                  />
+                )}
               </View>
               <ThemedText type="subtitle" style={styles.userName}>{userName}</ThemedText>
             </ThemedView>
@@ -266,15 +304,25 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
             <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
           </TouchableOpacity>
 
+
           <TouchableOpacity 
             style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
             onPress={() => {
               onClose();
-              // Add notification settings if needed
+              router.push('/(login)/privacy');
             }}
           >
-            <MaterialIcons name="notifications" size={24} color={Colors.primary} />
-            <ThemedText style={styles.menuText}>Notifications</ThemedText>
+            <MaterialIcons name="privacy-tip" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Privacy</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={handleShowTabGuide}
+          >
+            <MaterialIcons name="help" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Tab Guide</ThemedText>
             <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
           </TouchableOpacity>
 
@@ -282,11 +330,11 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
             style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
             onPress={() => {
               onClose();
-              // Add privacy settings if needed
+              Linking.openURL('https://forms.gle/YDQ9cKPoZLLdGpoS6');
             }}
           >
-            <MaterialIcons name="privacy-tip" size={24} color={Colors.primary} />
-            <ThemedText style={styles.menuText}>Privacy</ThemedText>
+            <MaterialIcons name="feedback" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Feedback Survey</ThemedText>
             <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
           </TouchableOpacity>
         </ThemedView>

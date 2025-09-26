@@ -1,12 +1,15 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
-import { Platform, View } from 'react-native';
+import { Tabs, usePathname, useFocusEffect } from 'expo-router';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Platform, View, Text, TouchableOpacity } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { AuthGuard } from '@/components/AuthGuard';
+import TabGuide from '@/components/TabGuide';
+import { getTabGuidanceStatus } from '@/lib/onboardingStorage';
+import { notificationService } from '@/lib/notificationService';
 
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
@@ -15,6 +18,104 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 // This file is the main layout for the tabs in the app.
 
 export default function TabLayout() {
+  // Temporarily set to true for testing - change back to false when debugging is complete
+  const [showTabGuide, setShowTabGuide] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const pathname = usePathname();
+
+  const checkTabGuidance = useCallback(async () => {
+    try {
+      console.log('[TabLayout] 🔍 Checking tab guidance status...');
+      const hasSeenGuidance = await getTabGuidanceStatus();
+      console.log('[TabLayout] 📊 Tab guidance status:', hasSeenGuidance);
+      console.log('[TabLayout] 🔍 Current showTabGuide state:', showTabGuide);
+      
+      if (!hasSeenGuidance) {
+        console.log('[TabLayout] 🎯 Tab guide should be shown, showing guide in 1 second...');
+        // Show guide after a short delay to ensure tabs are rendered
+        setTimeout(() => {
+          console.log('[TabLayout] ✨ Setting showTabGuide to true!');
+          setShowTabGuide(true);
+          console.log('[TabLayout] 🔍 showTabGuide state after setting:', true);
+        }, 1000);
+      } else {
+        console.log('[TabLayout] ✅ User has already seen the guide - NOT showing guide');
+        setShowTabGuide(false);
+      }
+    } catch (error) {
+      console.error('[TabLayout] ❌ Error checking tab guidance status:', error);
+    }
+  }, [showTabGuide]);
+
+  useEffect(() => {
+    checkTabGuidance();
+    
+    // Initialize notification service
+    notificationService.initialize();
+
+    // Subscribe to notification updates
+    const unsubscribe = notificationService.subscribe((notifications) => {
+      const unread = notifications.filter(n => !n.read).length;
+      setUnreadCount(unread);
+    });
+
+    // Get initial unread count
+    const initialNotifications = notificationService.getNotifications();
+    const initialUnread = initialNotifications.filter(n => !n.read).length;
+    setUnreadCount(initialUnread);
+
+    return () => {
+      unsubscribe();
+    };
+  }, [checkTabGuidance]);
+
+  // Check tab guidance when screen comes into focus (e.g., returning from settings)
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[TabLayout] 🔄 Screen focused, checking tab guidance...');
+      checkTabGuidance();
+    }, [checkTabGuidance])
+  );
+
+
+  const handleTabGuideComplete = () => {
+    setShowTabGuide(false);
+  };
+
+  // Check if user is currently on home tab
+  const isOnHomeTab = pathname === '/(tabs)/' || pathname === '/(tabs)/index';
+
+  // Custom home tab icon with badge
+  const HomeTabIcon = ({ color }: { color: string }) => (
+    <View style={{ position: 'relative' }}>
+      <IconSymbol size={32} name="house.fill" color={color} />
+      {!isOnHomeTab && unreadCount > 0 && (
+        <View style={{
+          position: 'absolute',
+          top: -2,
+          right: -2,
+          backgroundColor: '#e74c3c',
+          borderRadius: 10,
+          minWidth: 20,
+          height: 20,
+          justifyContent: 'center',
+          alignItems: 'center',
+          borderWidth: 2,
+          borderColor: '#fff',
+        }}>
+          <Text style={{
+            color: '#fff',
+            fontSize: 12,
+            fontWeight: 'bold',
+            textAlign: 'center',
+          }}>
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <AuthGuard>
       <Tabs
@@ -55,7 +156,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ color }) => <IconSymbol size={32} name="house.fill" color={color} />,
+          tabBarIcon: ({ color }) => <HomeTabIcon color={color} />,
         }}
       />
       <Tabs.Screen
@@ -103,6 +204,12 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    
+    <TabGuide 
+      visible={showTabGuide} 
+      onComplete={handleTabGuideComplete} 
+    />
+    
     </AuthGuard>
   );
 }

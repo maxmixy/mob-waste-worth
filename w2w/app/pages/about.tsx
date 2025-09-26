@@ -145,15 +145,6 @@ function AboutScreen() {
                 </TouchableOpacity>
             </ThemedView>
 
-            {/* Footer */}
-            <ThemedView style={styles.footerSection}>
-                <ThemedText style={styles.footerText}>
-                    © 2025 Waste to Worth. All rights reserved.
-                </ThemedText>
-                <ThemedText style={styles.footerText}>
-                    Made with ❤️ for a sustainable future
-                </ThemedText>
-            </ThemedView>
             </ScrollView>
         </ThemedView>
     );
@@ -304,19 +295,6 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         fontWeight: '600',
-    },
-    footerSection: {
-        backgroundColor: '#00630F',
-        padding: 20,
-        marginBottom: 32,
-        borderRadius: 16,
-        alignItems: 'center',
-    },
-    footerText: {
-        color: '#FFFFFF',
-        fontSize: 14,
-        textAlign: 'center',
-        marginBottom: 4,
     },
 });
 

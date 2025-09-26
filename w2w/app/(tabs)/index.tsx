@@ -18,6 +18,8 @@ import { useClimate } from '@/hooks/useClimate';
 import { populateTropicalDisposalTable, getUniqueMaterialsCount, getTropicalDisposalCount } from '@/lib/adminService';
 import { useAuth } from '@/contexts/AuthContext';
 import { questService } from '@/lib/questService';
+import NotificationIcon from '@/components/NotificationIcon';
+import NotificationModal from '@/components/NotificationModal';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -62,6 +64,7 @@ export default function HomeScreen() {
   const params = useLocalSearchParams();
   const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [userMaterials, setUserMaterials] = useState<MaterialData[]>([]);
   const [userProjects, setUserProjects] = useState<ProjectData[]>([]);
   const [currentProject, setCurrentProject] = useState<CurrentProjectData | null>(null);
@@ -291,6 +294,7 @@ export default function HomeScreen() {
       setAdminTapCount(0);
     }, 5000);
   };
+
 
   // Refresh current project data
   const refreshCurrentProject = async (userId: string) => {
@@ -682,6 +686,11 @@ export default function HomeScreen() {
         visible={sidebarVisible} 
         onClose={() => setSidebarVisible(false)} 
       />
+      
+      <NotificationModal
+        visible={showNotificationModal}
+        onClose={() => setShowNotificationModal(false)}
+      />
       <View
         style={{ flex: 1, backgroundColor: Colors.background }}
       >
@@ -697,6 +706,11 @@ export default function HomeScreen() {
               <ThemedText type="title">Home</ThemedText>
             </ThemedView>
             <View style={styles.headerActions}>
+              <NotificationIcon 
+                onPress={() => setShowNotificationModal(true)}
+                size={24}
+                color={Colors.icon}
+              />
               <Pressable
                 style={styles.settingsButton}
                 onPress={() => setSidebarVisible(true)}
@@ -805,7 +819,7 @@ export default function HomeScreen() {
                       <ThemedText style={styles.tapToViewText}>
                         Tap to view details
                       </ThemedText>
-                      <MaterialIcons name="arrow-forward" size={16} color="#007AFF" />
+                      <MaterialIcons name="chevron-right" size={16} color="#8BC34A" />
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -829,7 +843,7 @@ export default function HomeScreen() {
                 >
                   <View style={styles.showMoreContainer}>
                     <ThemedText style={styles.showMoreText}>Show More</ThemedText>
-                    <MaterialIcons name="chevron-right" size={18} color="#007AFF" />
+                    <MaterialIcons name="chevron-right" size={18} color="#8BC34A" />
                   </View>
                 </Pressable>
               )}
@@ -863,7 +877,7 @@ export default function HomeScreen() {
                         <ThemedText style={styles.tapToViewText}>
                           Tap to view details
                         </ThemedText>
-                        <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                        <MaterialIcons name="chevron-right" size={16} color="#8BC34A" />
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -1011,6 +1025,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
   refreshButton: {
     padding: 8,
@@ -1214,14 +1229,14 @@ const styles = StyleSheet.create({
   showMoreButton: {
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    backgroundColor: 'rgba(139, 195, 74, 0.1)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(0, 122, 255, 0.3)',
+    borderColor: 'rgba(139, 195, 74, 0.3)',
   },
   showMoreText: {
     fontSize: 14,
-    color: '#007AFF',
+    color: '#8BC34A',
     fontWeight: '500',
   },
   materialsContainer: {
@@ -1279,13 +1294,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    backgroundColor: 'rgba(139, 195, 74, 0.1)',
     borderRadius: 12,
     gap: 4,
   },
   tapToViewText: {
     fontSize: 12,
-    color: '#007AFF',
+    color: '#8BC34A',
     fontWeight: '600',
   },
   showMoreContainer: {
