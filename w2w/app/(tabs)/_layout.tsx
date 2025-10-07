@@ -4,6 +4,7 @@ import { Platform, View, Text, TouchableOpacity } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import HomeTabIcon from '@/components/ui/HomeTabIcon';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { AuthGuard } from '@/components/AuthGuard';

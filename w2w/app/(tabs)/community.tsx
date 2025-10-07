@@ -21,7 +21,7 @@ import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 
 import SettingsSidebar from '@/components/SettingsSidebar';
 
-const API_BASE_URL = 'http://127.0.0.1:5000';
+import { API_BASE_URL } from '@/lib/config';
 
 interface PostMedia {
   media_type: string;

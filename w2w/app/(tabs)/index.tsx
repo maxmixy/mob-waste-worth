@@ -21,7 +21,7 @@ import { questService } from '@/lib/questService';
 import NotificationIcon from '@/components/NotificationIcon';
 import NotificationModal from '@/components/NotificationModal';
 
-const API_BASE_URL = 'http://127.0.0.1:5000';
+import { API_BASE_URL } from '@/lib/config';
 
 // Types for the data structure
 interface MaterialData {

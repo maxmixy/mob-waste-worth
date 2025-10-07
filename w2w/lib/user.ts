@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export const USER_ID_KEY = 'userUid';
 export const EULA_ACCEPTED_KEY = 'eulaAccepted';
 
+import { API_BASE_URL } from './config';
+
 /**
  * Persist the logged-in user's uid so other pages can read it later.
  */
@@ -38,7 +40,7 @@ export async function removeUserId(): Promise<void> {
  */
 export async function checkEULAAcceptance(userId: string): Promise<{eulaAccepted: boolean, isNewUser: boolean}> {
   try {
-    const response = await fetch(`http://127.0.0.1:5000/user/${userId}/eula`, {
+  const response = await fetch(`${API_BASE_URL}/user/${userId}/eula`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -66,7 +68,7 @@ export async function checkEULAAcceptance(userId: string): Promise<{eulaAccepted
  */
 export async function updateEULAAcceptance(userId: string, accepted: boolean): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:5000/user/${userId}/eula`, {
+  const response = await fetch(`${API_BASE_URL}/user/${userId}/eula`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -114,7 +116,7 @@ export async function isEULAAcceptedLocally(): Promise<boolean> {
  */
 export async function checkProfileCompletion(userId: string): Promise<{profileCompleted: boolean, profileData?: any}> {
   try {
-    const response = await fetch(`http://127.0.0.1:5000/user/${userId}/profile`, {
+  const response = await fetch(`${API_BASE_URL}/user/${userId}/profile`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -141,7 +143,7 @@ export async function checkProfileCompletion(userId: string): Promise<{profileCo
  */
 export async function updateUserProfile(userId: string, profileData: any): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:5000/user/${userId}/profile`, {
+  const response = await fetch(`${API_BASE_URL}/user/${userId}/profile`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

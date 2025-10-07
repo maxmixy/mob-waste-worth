@@ -14,7 +14,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import SettingsSidebar from '@/components/SettingsSidebar';
 import { ScrollView as RNScrollView } from 'react-native';
 
-const API_BASE_URL = 'http://127.0.0.1:5000';
+import { API_BASE_URL } from '@/lib/config';
 
 // Types for the data structure
 interface MaterialData {

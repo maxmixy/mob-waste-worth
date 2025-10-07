@@ -23,7 +23,7 @@ class EducationalService {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = API_BASE_URL || 'http://127.0.0.1:5000';
+  this.baseUrl = API_BASE_URL;
   }
 
   /**

@@ -6,12 +6,9 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import WasteToWorthLogo from '@/components/WasteToWorthLogo';
-import { GoogleIconButton, FacebookIconButton } from '@/components/SocialLoginButtons';
+// Social login buttons removed
 import { FloatingLabelInput } from '@/components/FloatingLabelInput';
-import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
-import { makeRedirectUri } from 'expo-auth-session';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import { saveUserId, checkEULAAcceptance, checkProfileCompletion } from '@/lib/user';
 import { useLocation } from '@/hooks/useLocation';
 import { useClimateStorage } from '@/hooks/useClimateStorage';
@@ -28,7 +25,6 @@ import Animated, {
   runOnJS
 } from 'react-native-reanimated';
 
-WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginPage() {
   const router = useRouter();
@@ -227,41 +223,6 @@ export default function LoginPage() {
     }
   };
 
-  // ✅ Google auth
-  const redirectUri = makeRedirectUri({ scheme: 'wastetoworth' });
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: '648267234726-q90cnh8men8ffntu76te6t69t07rhmjv.apps.googleusercontent.com',
-    redirectUri,
-    scopes: ['profile', 'email'],
-  });
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token, access_token } = response.params;
-      const credential = GoogleAuthProvider.credential(id_token, access_token);
-      signInWithCredential(auth, credential)
-        .then(async (uc: any) => {
-          if (uc?.user?.uid) {
-            await saveUserId(uc.user.uid);
-            
-            // Handle post-login flow (EULA, profile, climate data)
-            await handlePostLogin(uc.user.uid);
-          }
-        })
-        .catch(() => setEmailError('Google sign-in failed.'));
-    } else if (response?.type === 'error') {
-      setEmailError('Google sign-in cancelled or failed.');
-    }
-  }, [response]);
-
-  const handleGoogleLogin = async () => {
-    try {
-      await promptAsync();
-    } catch {
-      setEmailError('Google login failed.');
-    }
-  };
-
   // Show loading while checking authentication
   if (isLoading) {
     return (
@@ -366,27 +327,7 @@ export default function LoginPage() {
         <ThemedText style={[styles.buttonText, styles.signupButtonText]}>Create account</ThemedText>
       </TouchableOpacity>
 
-      {/* Social login */}
-      <View style={styles.socialContainer}>
-        <View style={styles.dividerContainer}>
-          <View style={styles.dividerLine} />
-          <ThemedText style={styles.dividerText}>or continue with</ThemedText>
-          <View style={styles.dividerLine} />
-        </View>
-        
-        <View style={styles.socialButtonsRow}>
-          <GoogleIconButton 
-            onPress={handleGoogleLogin} 
-            disabled={loading}
-            loading={loading}
-          />
-          
-          <FacebookIconButton 
-            onPress={() => alert('Facebook login not implemented yet')} 
-            disabled={loading}
-          />
-        </View>
-      </View>
+  {/* Social logins removed — email/password only */}
         </ScrollView>
       </Animated.View>
     </KeyboardAvoidingView>

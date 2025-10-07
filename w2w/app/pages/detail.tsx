@@ -16,9 +16,8 @@ import { educationalService, EducationalContent } from '@/lib/educationalService
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { Colors } from '@/constants/Colors';
-const LOG_URL = 'http://127.0.0.1:5000/log';
-
-const API_BASE_URL = 'http://127.0.0.1:5000';
+import { API_BASE_URL } from '@/lib/config';
+const LOG_URL = `${API_BASE_URL}/log`;
 
 // Types for the data structure
 interface ImageOption {

@@ -6,17 +6,13 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { Colors } from '@/constants/Colors';
 import WasteToWorthLogo from '@/components/WasteToWorthLogo';
-import { GoogleIconButton, FacebookIconButton } from '@/components/SocialLoginButtons';
 import { FloatingLabelInput } from '@/components/FloatingLabelInput';
-import { createUserWithEmailAndPassword, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { saveUserId, updateEULAAcceptance } from '@/lib/user';
 import EULA from '@/components/EULA';
 import { useAuth } from '@/contexts/AuthContext';
 import { auth, db } from '@/lib/firebaseConfig';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
-import { makeRedirectUri } from 'expo-auth-session';
 import { LinearGradient } from 'expo-linear-gradient';
 import { clearOnboardingStatus } from '@/lib/onboardingStorage';
 import Animated, { 
@@ -28,7 +24,6 @@ import Animated, {
   runOnJS
 } from 'react-native-reanimated';
 
-WebBrowser.maybeCompleteAuthSession();
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -123,13 +118,6 @@ export default function SignUpPage() {
     };
   }, [appState, isAuthenticated, isLoading, router]);
 
-  // Google auth setup
-  const redirectUri = makeRedirectUri({ scheme: 'wastetoworth' });
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: '648267234726-q90cnh8men8ffntu76te6t69t07rhmjv.apps.googleusercontent.com',
-    redirectUri,
-    scopes: ['profile', 'email'],
-  });
 
   // Redirect authenticated users to main app
   useEffect(() => {
@@ -139,38 +127,6 @@ export default function SignUpPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
-  // Handle Google auth response
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token, access_token } = response.params;
-      const credential = GoogleAuthProvider.credential(id_token, access_token);
-      signInWithCredential(auth, credential)
-        .then(async (uc: any) => {
-          if (uc?.user?.uid) {
-            await saveUserId(uc.user.uid);
-            
-            // Update EULA acceptance status
-            await updateEULAAcceptance(uc.user.uid, true);
-
-            try {
-              await setDoc(doc(db, 'User_Collection', uc.user.uid), {
-                email: uc.user.email || null,
-                createdAt: serverTimestamp(),
-                eulaAccepted: true,
-                eulaAcceptedAt: serverTimestamp(),
-              });
-            } catch (e) {
-              console.warn('⚠️ Failed to create user document:', e);
-            }
-
-            router.replace('/(tabs)/' as any);
-          }
-        })
-        .catch(() => setEmailError('Google sign-up failed.'));
-    } else if (response?.type === 'error') {
-      setEmailError('Google sign-up cancelled or failed.');
-    }
-  }, [response]);
 
   const handleSignUp = async () => {
     setLoading(true);
@@ -262,14 +218,6 @@ export default function SignUpPage() {
     setPendingUserData(null);
   };
 
-  // Handle Google signup
-  const handleGoogleSignup = async () => {
-    try {
-      await promptAsync();
-    } catch {
-      setEmailError('Google signup failed.');
-    }
-  };
 
   // Show EULA if user has completed signup form
   if (showEULA) {
@@ -397,27 +345,7 @@ export default function SignUpPage() {
         <ThemedText style={[styles.buttonText, styles.backButtonText]}>Back to Log in</ThemedText>
       </TouchableOpacity>
 
-      {/* Social login */}
-      <View style={styles.socialContainer}>
-        <View style={styles.dividerContainer}>
-          <View style={styles.dividerLine} />
-          <ThemedText style={styles.dividerText}>or sign up with</ThemedText>
-          <View style={styles.dividerLine} />
-        </View>
-        
-        <View style={styles.socialButtonsRow}>
-          <GoogleIconButton 
-            onPress={handleGoogleSignup} 
-            disabled={loading}
-            loading={loading}
-          />
-          
-          <FacebookIconButton 
-            onPress={() => alert('Facebook signup not implemented yet')} 
-            disabled={loading}
-          />
-        </View>
-      </View>
+  {/* Social logins removed - email/password only */}
         </ScrollView>
       </Animated.View>
     </KeyboardAvoidingView>

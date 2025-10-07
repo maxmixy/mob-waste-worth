@@ -1,5 +1,5 @@
 // API Configuration
-export const API_BASE_URL = 'http://127.0.0.1:5000';
+export const API_BASE_URL = 'https://maxmixy.pythonanywhere.com';
 
 // Other configuration constants can be added here
 export const UPLOAD_FOLDER = 'uploads/profile_images';

@@ -3788,7 +3788,7 @@ def upload_project_photo():
             
             # In production, upload to Hostinger here
             # For now, return local path
-            photo_url = f"http://127.0.0.1:5000/{upload_path}"
+            photo_url = f"https://maxmixy.pythonanywhere.com/{upload_path}"
             
             # Update project in database with photo URL
             if db:

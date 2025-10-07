@@ -25,10 +25,11 @@ import { useAuth } from '@/contexts/AuthContext';
 // For local Python backend (this repo) the endpoint is POST /upload on port 5000.
 // Common development values:
 // - Android emulator (default): http://10.0.2.2:5000/upload
-// - iOS simulator / Expo on same machine: http://127.0.0.1:5000/upload
+// - iOS simulator / Expo on same machine: use the machine's IP or the production UPLOAD_URL
 // - Real device on same LAN: http://<YOUR_MACHINE_IP>:5000/upload
 // Change to the appropriate value for your testing environment.
-const UPLOAD_URL = 'http://127.0.0.1:5000/upload';
+import { API_BASE_URL } from '@/lib/config';
+const UPLOAD_URL = `${API_BASE_URL}/upload`;
 
 export default function HomeScreen() {
     const isFocused = useIsFocused();
@@ -170,19 +171,42 @@ export default function HomeScreen() {
                         });
                     } catch (err2) {
                         console.warn('Blob upload failed, trying JSON/base64 fallback:', err2);
-                        // 3) JSON base64 fallback (uses expo-file-system to read file as base64)
-                        try {
-                            const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-                            const dataUrl = `data:${mime};base64,${b64}`;
-                            res = await fetch(UPLOAD_URL, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ image: dataUrl }),
-                            });
-                        } catch (err3) {
-                            console.error('All upload methods failed:', err1, err2, err3);
-                            throw err3;
-                        }
+            // 3) JSON/base64 fallback.
+            // On native we can use expo-file-system. On web the native module isn't available
+            // so read the file via fetch() -> Blob -> FileReader to create a base64 data URL.
+            try {
+              let b64: string | null = null;
+              if (Platform.OS === 'web') {
+                // web: fetch the URI and convert blob -> base64
+                const fileResp = await fetch(uri);
+                const blob = await fileResp.blob();
+                b64 = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    const result = reader.result as string | null;
+                    if (!result) return reject(new Error('Failed to read blob as data URL'));
+                    const comma = result.indexOf(',');
+                    resolve(result.slice(comma + 1));
+                  };
+                  reader.onerror = (e) => reject(e);
+                  reader.readAsDataURL(blob);
+                });
+              } else {
+                // native: use expo-file-system
+                // cast to any to avoid TypeScript EncodingType mismatch in some SDKs
+                b64 = await (FileSystem as any).readAsStringAsync(uri, { encoding: (FileSystem as any).EncodingType?.Base64 || 'base64' });
+              }
+
+              const dataUrl = `data:${mime};base64,${b64}`;
+              res = await fetch(UPLOAD_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataUrl }),
+              });
+            } catch (err3) {
+              console.error('All upload methods failed:', err1, err2, err3);
+              throw err3;
+            }
                     }
                 }
  

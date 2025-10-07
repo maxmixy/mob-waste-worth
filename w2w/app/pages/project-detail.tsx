@@ -14,7 +14,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { Colors } from '@/constants/Colors';
 
-const API_BASE_URL = 'http://127.0.0.1:5000';
+import { API_BASE_URL } from '@/lib/config';
 
 // Types for the project data structure
 interface RecyclingProject {

@@ -195,10 +195,10 @@ python test_quest_generation.py
 ### Manual Testing with curl
 ```bash
 # Check and auto-generate
-curl -X GET http://127.0.0.1:5000/quests/check-and-generate
+curl -X GET https://maxmixy.pythonanywhere.com/quests/check-and-generate
 
 # Manual generation
-curl -X POST http://127.0.0.1:5000/quests/generate \
+curl -X POST https://maxmixy.pythonanywhere.com/quests/generate \
   -H "Content-Type: application/json" \
   -d '{"min_quests": 3, "quests_to_generate": 5}'
 ```

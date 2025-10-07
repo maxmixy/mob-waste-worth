@@ -1,7 +1,7 @@
 import { getUserId } from './user';
 import { notificationService } from './notificationService';
+import { API_BASE_URL } from './config';
 
-const API_BASE_URL = 'http://127.0.0.1:5000';
 
 export interface QuestProgressUpdate {
   questId: string;

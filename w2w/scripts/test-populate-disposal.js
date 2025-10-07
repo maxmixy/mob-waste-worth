@@ -1,7 +1,7 @@
 // Test script to populate tropical disposal table
 // Run this with: node scripts/test-populate-disposal.js
 
-const API_BASE_URL = 'http://127.0.0.1:5000';
+const API_BASE_URL = 'https://maxmixy.pythonanywhere.com';
 
 async function testPopulateDisposal() {
   try {

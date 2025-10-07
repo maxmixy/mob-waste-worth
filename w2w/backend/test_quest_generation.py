@@ -9,7 +9,7 @@ import json
 import time
 
 # Backend URL
-BASE_URL = "http://127.0.0.1:5000"
+BASE_URL = "https://maxmixy.pythonanywhere.com"
 
 def test_quest_generation():
     """Test the quest generation endpoints"""
