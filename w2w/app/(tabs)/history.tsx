@@ -189,22 +189,25 @@ export default function HistoryScreen() {
       const userMaterialsData = await fetchUserMaterials(userId);
       
       if (userMaterialsData.length > 0) {
-        // Fetch details for each material and their projects
-        const historyPromises = userMaterialsData.map(async (materialId: string) => {
+        // Ensure most recent scans appear on top by reversing incoming order
+        const materialsOrdered = [...userMaterialsData].reverse();
+
+        // Fetch details for each material and their projects in display order
+        const historyPromises = materialsOrdered.map(async (materialId: string) => {
           const materialDetails = await fetchMaterialDetails(materialId);
           if (materialDetails) {
             const projects = await fetchRecyclingProjects(materialDetails.Name);
             return {
               material: materialDetails,
               projects: projects,
-              scanDate: new Date().toLocaleDateString() // You can add actual scan dates to your backend
+              scanDate: new Date().toLocaleString()
             };
           }
           return null;
         });
         
         const historyResults = await Promise.all(historyPromises);
-        const validHistory = historyResults.filter(item => item !== null);
+        const validHistory = historyResults.filter(item => item !== null) as ScanHistoryItem[];
         setScanHistory(validHistory);
       } else {
         setScanHistory([]);

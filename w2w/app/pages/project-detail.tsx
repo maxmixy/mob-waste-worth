@@ -367,7 +367,7 @@ function ProjectDetailScreen() {
 
     if (loading) {
         return (
-            <ThemedView style={styles.loadingContainer}>
+            <ThemedView style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
                 <LogoLoadingAnimation size={120} showBackground={true} />
             </ThemedView>
         );
@@ -375,7 +375,7 @@ function ProjectDetailScreen() {
 
     if (error || !project) {
         return (
-            <ThemedView style={styles.errorContainer}>
+            <ThemedView style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
                 <ThemedText style={styles.errorText}>
                     {error || 'Project not found'}
                 </ThemedText>

@@ -70,6 +70,7 @@ export default function CommunityScreen() {
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [userProfileImages, setUserProfileImages] = useState<{[userId: string]: string}>({});
   const [userNames, setUserNames] = useState<{[userId: string]: string}>({});
+  const [userLevels, setUserLevels] = useState<{[userId: string]: string}>({});
   const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
   const [likingPostId, setLikingPostId] = useState<string | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -346,6 +347,7 @@ export default function CommunityScreen() {
       const userIds = [...new Set(data.map((post: PostData) => post.user_id))];
       await loadUserProfileImages(userIds);
       await loadUserNames(userIds);
+      await loadUserLevels(userIds);
     } catch (err) {
       console.error('Error loading posts:', err);
       setError('Failed to load posts');
@@ -474,6 +476,85 @@ export default function CommunityScreen() {
     console.log('Updated user names:', newUserNames);
   };
 
+  // Compute level from points (same thresholds as Quests)
+  const calculateLevelFromPoints = (points: number): string => {
+    if (points < 50) return 'Eco Beginner';
+    if (points < 150) return 'Eco Explorer';
+    if (points < 300) return 'Eco Warrior';
+    if (points < 500) return 'Eco Champion';
+    if (points < 750) return 'Eco Master';
+    return 'Eco Legend';
+  };
+
+  const loadUserLevels = async (userIds: string[]) => {
+    console.log('Loading user levels for users:', userIds);
+    const usersToLoad = userIds; // Always refresh to avoid stale cache
+
+    // Fetch all quests once to mirror Quests tab calculations
+    let allQuests: Array<{ id: string; points: number }>|null = null;
+    try {
+      const questsRes = await fetch(`${API_BASE_URL}/quests`);
+      const questsData = await questsRes.json().catch(() => null) as any;
+      if (questsData && questsData.success && Array.isArray(questsData.quests)) {
+        allQuests = questsData.quests.map((q: any) => ({ id: q.id, points: q.points }));
+      }
+    } catch (e) {
+      console.warn('Could not fetch quests list for level calc; falling back to stats only');
+    }
+
+    const levelPromises = usersToLoad.map(async (uid) => {
+      try {
+        // Fetch backend stats
+        const [statsRes, progressRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/user/${uid}/quests/stats`),
+          allQuests ? fetch(`${API_BASE_URL}/user/${uid}/quests/progress`) : Promise.resolve(null as any),
+        ]);
+
+        const statsData = await statsRes.json().catch(() => null) as any;
+        let backendPoints = 0;
+        let backendLevel: string | undefined;
+        if (statsData && statsData.success) {
+          backendPoints = statsData.stats?.total_points ?? 0;
+          backendLevel = statsData.stats?.level;
+        }
+
+        // Optionally compute points from completed quests like Quests tab
+        let computedPoints = 0;
+        if (allQuests && progressRes) {
+          const progressData = await progressRes.json().catch(() => null) as any;
+          if (progressData && progressData.success && Array.isArray(progressData.progress)) {
+            const completedIds = new Set(
+              progressData.progress
+                .filter((p: any) => p.is_completed)
+                .map((p: any) => p.quest_id)
+            );
+            computedPoints = allQuests
+              .filter(q => completedIds.has(q.id))
+              .reduce((sum, q) => sum + (q.points || 0), 0);
+          }
+        }
+
+        const actualPoints = Math.max(backendPoints, computedPoints);
+        const level = (backendLevel && actualPoints === backendPoints)
+          ? backendLevel
+          : calculateLevelFromPoints(actualPoints);
+
+        return { userId: uid, level };
+      } catch (error) {
+        console.error(`Error loading user level for user ${uid}:`, error);
+        return { userId: uid, level: 'Eco Beginner' };
+      }
+    });
+
+    const results = await Promise.all(levelPromises);
+    const newLevels: {[userId: string]: string} = { ...userLevels };
+    results.forEach(({ userId, level }) => {
+      newLevels[userId] = level;
+    });
+    setUserLevels(newLevels);
+    console.log('Updated user levels:', newLevels);
+  };
+
   useEffect(() => {
     (async () => {
       const uid = await getUserId();
@@ -487,6 +568,21 @@ export default function CommunityScreen() {
       // Camera permissions are handled by useCameraPermissions hook
     })();
   }, []);
+
+  // Ensure levels stay accurate when posts list changes
+  useEffect(() => {
+    const ensureLevels = async () => {
+      try {
+        const ids = [...new Set(posts.map(p => p.user_id))];
+        if (ids.length > 0) {
+          await loadUserLevels(ids);
+        }
+      } catch (e) {
+        // noop
+      }
+    };
+    ensureLevels();
+  }, [posts]);
 
   const handleLike = async (postId: string) => {
     if (!userId) return;
@@ -1137,9 +1233,9 @@ export default function CommunityScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <ThemedText style={styles.postUser}>
-                    {postDataItem.user_id === userId && userProfile 
+                    {(userNames[postDataItem.user_id] || (postDataItem.user_id === userId && userProfile 
                       ? `${userProfile.firstName} ${userProfile.lastName}` 
-                      : postDataItem.user_id}
+                      : postDataItem.user_id)) + ` • ${userLevels[postDataItem.user_id] ?? '...'}`}
                   </ThemedText>
                   {postDataItem.created_at && (
                     <ThemedText style={styles.postDate}>

@@ -857,7 +857,7 @@ function DetailScreen() {
 
     if (loading) {
         return (
-            <ThemedView style={styles.loadingContainer}>
+            <ThemedView style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
                 <LogoLoadingAnimation size={120} showBackground={true} />
             </ThemedView>
         );
@@ -865,7 +865,7 @@ function DetailScreen() {
 
     if (error) {
         return (
-            <ThemedView style={styles.errorContainer}>
+            <ThemedView style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
                 <ThemedText style={styles.errorText}>{error}</ThemedText>
             </ThemedView>
         );
@@ -873,7 +873,7 @@ function DetailScreen() {
 
     if (!pageData) {
         return (
-            <ThemedView style={styles.errorContainer}>
+            <ThemedView style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
                 <ThemedText style={styles.errorText}>No material data available</ThemedText>
             </ThemedView>
         );
