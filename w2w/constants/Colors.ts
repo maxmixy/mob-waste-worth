@@ -69,4 +69,24 @@ export const Colors = {
     primaryLight: primaryGreenLight,
     accent: accentGreen,
   },
+  
+  // Dark theme (same as light since we're using light theme only)
+  dark: {
+    text: textDark,
+    background: backgroundPrimary,
+    backgroundSecondary: backgroundSecondary,
+    tint: primaryGreen,
+    icon: textSecondary,
+    tabIconDefault: textMuted,
+    tabIconSelected: primaryGreen,
+    border: '#E0E0E0',
+    card: backgroundCard,
+    success: success,
+    warning: warning,
+    error: error,
+    info: info,
+    primary: primaryGreen,
+    primaryLight: primaryGreenLight,
+    accent: accentGreen,
+  },
 };

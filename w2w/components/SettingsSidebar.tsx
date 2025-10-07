@@ -106,15 +106,18 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
     }
   };
 
-  const handleShowTabGuide = async () => {
+  const handleResetTabGuide = async () => {
     try {
       await clearTabGuidanceStatus();
       onClose();
-      // The tab guide will automatically show when the user navigates back to the tabs
-      // since the guidance status has been cleared
+      Alert.alert(
+        'Tab Guide Reset', 
+        'The tab guide will be shown again when you restart the app.',
+        [{ text: 'OK' }]
+      );
     } catch (error) {
-      console.error('Error showing tab guide:', error);
-      Alert.alert('Error', 'Failed to show tab guide. Please try again.');
+      console.error('Error resetting tab guide:', error);
+      Alert.alert('Error', 'Failed to reset tab guide. Please try again.');
     }
   };
 
@@ -352,6 +355,15 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
           >
             <MaterialIcons name="feedback" size={24} color={Colors.primary} />
             <ThemedText style={styles.menuText}>Feedback Survey</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={handleResetTabGuide}
+          >
+            <MaterialIcons name="help-outline" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>Show Tab Guide Again</ThemedText>
             <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
           </TouchableOpacity>
         </ThemedView>
