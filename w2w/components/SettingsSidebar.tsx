@@ -330,6 +330,23 @@ export default function SettingsSidebar({ visible, onClose }: SettingsSidebarPro
             style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
             onPress={() => {
               onClose();
+              // Open the local PDF file
+              const pdfPath = require('@/assets/documents/User Manual_Waste to Worth.pdf');
+              Linking.openURL(pdfPath).catch(err => {
+                console.error('Failed to open PDF:', err);
+                Alert.alert('Error', 'Unable to open user manual. Please check if the file exists.');
+              });
+            }}
+          >
+            <MaterialIcons name="menu-book" size={24} color={Colors.primary} />
+            <ThemedText style={styles.menuText}>User Manual</ThemedText>
+            <MaterialIcons name="chevron-right" size={24} color={Colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.menuItem, { borderBottomColor: Colors.primary }]}
+            onPress={() => {
+              onClose();
               Linking.openURL('https://forms.gle/YDQ9cKPoZLLdGpoS6');
             }}
           >
