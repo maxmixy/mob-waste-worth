@@ -1,4 +1,5 @@
 import { getUserId } from './user';
+import { notificationService } from './notificationService';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -10,14 +11,17 @@ export interface QuestProgressUpdate {
 
 export interface QuestProgressResult {
   success: boolean;
+  questId?: string;
   progress?: number;
   isCompleted?: boolean;
   pointsEarned?: number;
+  questTitle?: string;
   message?: string;
   error?: string;
 }
 
 class QuestService {
+  private recentlyNotifiedQuests: Set<string> = new Set();
   /**
    * Update quest progress for a specific quest
    */
@@ -52,9 +56,11 @@ class QuestService {
         console.log(`✅ QuestService: Successfully updated quest ${questId}. Progress: ${data.progress}, Completed: ${data.is_completed}, Points: ${data.points_earned}`);
         return {
           success: true,
+          questId: questId,
           progress: data.progress,
           isCompleted: data.is_completed,
           pointsEarned: data.points_earned,
+          questTitle: data.quest_title,
           message: data.message
         };
       } else {
@@ -273,20 +279,63 @@ class QuestService {
    * Check for completed quests and show notifications
    */
   async checkCompletedQuests(results: QuestProgressResult[]): Promise<void> {
-    const completedQuests = results.filter(result => result.success && result.isCompleted);
+    // Only notify for newly completed quests (those that earned points)
+    const newlyCompletedQuests = results.filter(result => 
+      result.success && 
+      result.isCompleted && 
+      (result.pointsEarned || 0) > 0
+    );
     
-    if (completedQuests.length > 0) {
-      const totalPoints = completedQuests.reduce((sum, quest) => sum + (quest.pointsEarned || 0), 0);
+    if (newlyCompletedQuests.length > 0) {
+      const totalPoints = newlyCompletedQuests.reduce((sum, quest) => sum + (quest.pointsEarned || 0), 0);
       
-      // You can customize this notification based on your app's notification system
-      console.log(`🎉 ${completedQuests.length} quest(s) completed! Total points earned: ${totalPoints}`);
+      console.log(`🎉 ${newlyCompletedQuests.length} quest(s) newly completed! Total points earned: ${totalPoints}`);
       
-      // Here you could trigger a notification or show a modal
-      // For now, we'll just log it
-      completedQuests.forEach(quest => {
-        console.log(`✅ Quest completed: ${quest.pointsEarned} points earned`);
-      });
+      // Add notifications for newly completed quests
+      for (const quest of newlyCompletedQuests) {
+        const questId = quest.questId || '';
+        
+        // Check if we've already notified for this quest recently
+        if (this.recentlyNotifiedQuests.has(questId)) {
+          console.log(`⏭️ Skipping notification for quest ${questId} - already notified recently`);
+          continue;
+        }
+        
+        console.log(`✅ Quest newly completed: ${quest.pointsEarned} points earned`);
+        
+        // Use quest title from the response, fallback to API call if not available
+        const questName = quest.questTitle || await this.getQuestName(questId);
+        notificationService.notifyQuestCompleted(questName);
+        
+        // Mark this quest as recently notified
+        this.recentlyNotifiedQuests.add(questId);
+        
+        // Remove from recently notified set after 30 seconds to allow future notifications
+        setTimeout(() => {
+          this.recentlyNotifiedQuests.delete(questId);
+        }, 30000);
+      }
     }
+  }
+
+  /**
+   * Get quest name from quest ID by fetching from API
+   */
+  private async getQuestName(questId: string): Promise<string> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/quests/${questId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.quest) {
+          return data.quest.title;
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching quest name:', error);
+    }
+    
+    // Fallback to generic name if API call fails
+    return 'Quest Completed';
   }
 }
 

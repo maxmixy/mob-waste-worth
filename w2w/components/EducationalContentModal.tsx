@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { ThemedView } from '@/components/ThemedView';
+import { ThemedText } from '@/components/ThemedText';
 import { Colors } from '@/constants/Colors';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 

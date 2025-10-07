@@ -18,6 +18,8 @@ import { useClimate } from '@/hooks/useClimate';
 import { populateTropicalDisposalTable, getUniqueMaterialsCount, getTropicalDisposalCount } from '@/lib/adminService';
 import { useAuth } from '@/contexts/AuthContext';
 import { questService } from '@/lib/questService';
+import NotificationIcon from '@/components/NotificationIcon';
+import NotificationModal from '@/components/NotificationModal';
 
 const API_BASE_URL = 'http://127.0.0.1:5000';
 
@@ -62,6 +64,7 @@ export default function HomeScreen() {
   const params = useLocalSearchParams();
   const { userId } = useAuth();
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [userMaterials, setUserMaterials] = useState<MaterialData[]>([]);
   const [userProjects, setUserProjects] = useState<ProjectData[]>([]);
   const [currentProject, setCurrentProject] = useState<CurrentProjectData | null>(null);
@@ -72,6 +75,37 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('User');
   const [adminTapCount, setAdminTapCount] = useState(0);
+
+  // Quests-style user stats (to mirror Quests tab summary)
+  interface UserStats {
+    totalPoints: number;
+    level: string;
+    levelProgress: number; // percent 0-100
+    completedQuests: number;
+    totalQuests: number;
+  }
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
+
+  // Match Quests: compute level and progress from points
+  const calculateLevelProgressFromPoints = (points: number): { level: string; progress: number } => {
+    const levelThresholds = [
+      { level: 'Eco Beginner', min: 0, max: 49 },
+      { level: 'Eco Explorer', min: 50, max: 149 },
+      { level: 'Eco Warrior', min: 150, max: 299 },
+      { level: 'Eco Champion', min: 300, max: 499 },
+      { level: 'Eco Master', min: 500, max: 749 },
+      { level: 'Eco Legend', min: 750, max: Infinity },
+    ];
+    for (const threshold of levelThresholds) {
+      if (points >= threshold.min && points <= threshold.max) {
+        const progressInLevel = points - threshold.min;
+        const levelRange = threshold.max - threshold.min;
+        const progress = levelRange > 0 ? (progressInLevel / levelRange) * 100 : 100;
+        return { level: threshold.level, progress: Math.min(progress, 100) };
+      }
+    }
+    return { level: 'Eco Legend', progress: 100 };
+  };
   
   // Location functionality (for automatic background location detection)
   const { location, requestLocation } = useLocation();
@@ -89,6 +123,34 @@ export default function HomeScreen() {
       console.error('Error fetching user materials:', error);
       return [];
     }
+  };
+
+  // Fetch user's quest statistics (same as in Quests screen)
+  const fetchUserStats = async (userId: string): Promise<UserStats> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/user/${userId}/quests/stats`);
+      const data = await response.json();
+      if (data.success) {
+        const points = data.stats.total_points as number;
+        const levelInfo = calculateLevelProgressFromPoints(points);
+        return {
+          totalPoints: points,
+          level: levelInfo.level,
+          levelProgress: levelInfo.progress,
+          completedQuests: data.stats.completed_quests,
+          totalQuests: data.stats.total_quests,
+        };
+      }
+    } catch (error) {
+      console.error('Error fetching user stats:', error);
+    }
+    return {
+      totalPoints: 0,
+      level: 'Eco Beginner',
+      levelProgress: 0,
+      completedQuests: 0,
+      totalQuests: 0,
+    };
   };
 
   // Fetch material details by ID
@@ -222,6 +284,9 @@ export default function HomeScreen() {
             const results = await questService.trackLocationAction(userId);
             await questService.checkCompletedQuests(results);
             console.log('✅ Location quest progress updated:', results);
+            // Refresh quest stats after quest-related actions
+            const latestStats = await fetchUserStats(userId);
+            setUserStats(latestStats);
           }
         } catch (questError) {
           console.error('❌ Error tracking location quest:', questError);
@@ -292,6 +357,7 @@ export default function HomeScreen() {
     }, 5000);
   };
 
+
   // Refresh current project data
   const refreshCurrentProject = async (userId: string) => {
     try {
@@ -353,6 +419,9 @@ export default function HomeScreen() {
         
         // Refresh user profile to update progress
         await refreshUserProfile();
+        // Also refresh stats to reflect points/level changes
+        const latestStats = await fetchUserStats(userId);
+        setUserStats(latestStats);
         
         console.log('✅ Project completion tracked successfully');
       }
@@ -447,6 +516,17 @@ export default function HomeScreen() {
     }
   };
 
+  // Refresh quest stats (used for real-time updates similar to Quests tab)
+  const refreshUserStats = async () => {
+    try {
+      if (!userId) return;
+      const stats = await fetchUserStats(userId);
+      setUserStats(stats);
+    } catch (error) {
+      console.error('🔄 Error refreshing user stats:', error);
+    }
+  };
+
   // Load profile image from web server
   const loadProfileImage = async (userId: string) => {
     try {
@@ -528,13 +608,17 @@ export default function HomeScreen() {
           return;
         }
 
-        // Fetch user's materials, profile data, and profile completion info
-        const [userMaterialsData, userDataResponse, profileInfo] = await Promise.all([
+        // Fetch user's materials, profile data, profile completion info, and quest stats
+        const [userMaterialsData, userDataResponse, profileInfo, stats] = await Promise.all([
           fetchUserMaterials(userId),
           fetchUserProfileData(userId),
-          checkProfileCompletion(userId)
+          checkProfileCompletion(userId),
+          fetchUserStats(userId)
         ]);
         
+        // Set quests-style stats
+        setUserStats(stats);
+
         // Set user data with enhanced logging
         if (userDataResponse) {
           console.log('👤 Setting user data:', {
@@ -650,6 +734,7 @@ export default function HomeScreen() {
             console.log('🔄 Screen focused, refreshing user data...');
             await refreshUserProfile();
             await refreshCurrentProject(userId);
+            await refreshUserStats();
           } catch (error) {
             console.error('Error refreshing data on focus:', error);
           }
@@ -682,6 +767,11 @@ export default function HomeScreen() {
         visible={sidebarVisible} 
         onClose={() => setSidebarVisible(false)} 
       />
+      
+      <NotificationModal
+        visible={showNotificationModal}
+        onClose={() => setShowNotificationModal(false)}
+      />
       <View
         style={{ flex: 1, backgroundColor: Colors.background }}
       >
@@ -697,6 +787,11 @@ export default function HomeScreen() {
               <ThemedText type="title">Home</ThemedText>
             </ThemedView>
             <View style={styles.headerActions}>
+              <NotificationIcon 
+                onPress={() => setShowNotificationModal(true)}
+                size={24}
+                color={Colors.icon}
+              />
               <Pressable
                 style={styles.settingsButton}
                 onPress={() => setSidebarVisible(true)}
@@ -707,69 +802,7 @@ export default function HomeScreen() {
             </View>
           </View>
           <View style={styles.sectionsContainer}>
-          {/* Profile Summary Section (Top) */}
-          <ThemedView style={[styles.section, { borderTopLeftRadius: 12, borderTopRightRadius: 12 }]}>
-            <View style={styles.userInfo}>
-              <Pressable 
-                style={styles.userImageContainer}
-                onPress={async () => {
-                  if (userId) {
-                    await loadProfileImage(userId);
-                  }
-                }}
-              >
-                <Image
-                  source={profileImageUrl ? { uri: profileImageUrl } : require('@/assets/images/partial-react-logo.png')}
-                  style={styles.userImage}
-                  resizeMode="cover"
-                />
-                {profileImageUrl && (
-                  <View style={styles.imageSourceIndicator}>
-                    <MaterialIcons 
-                      name={profileImageUrl.startsWith('http') ? 'cloud-done' : 'phone-android'} 
-                      size={10} 
-                      color="white" 
-                    />
-                  </View>
-                )}
-              </Pressable>
-              <View style={styles.userDetails}>
-                <ThemedText style={styles.userName}>
-                  {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : userData?.name || userName || 'User'}
-                </ThemedText>
-                <ThemedText style={styles.userLevel}>{userData?.achievement_title || 'Recycling Beginner'}</ThemedText>
-              </View>
-            </View>
-            
-            <View style={styles.statsGrid}>
-              <View style={styles.statItem}>
-                <ThemedText style={styles.statValue}>{userData?.progress || 0}</ThemedText>
-                <ThemedText style={styles.statLabel}>Points</ThemedText>
-              </View>
-              <View style={styles.statItem}>
-                <ThemedText style={styles.statValue}>{userMaterials.length}</ThemedText>
-                <ThemedText style={styles.statLabel}>Materials</ThemedText>
-              </View>
-              <View style={styles.statItem}>
-                <ThemedText style={styles.statValue}>{userProjects.filter(p => p.is_completed).length}</ThemedText>
-                <ThemedText style={styles.statLabel}>Completed</ThemedText>
-              </View>
-            </View>
-
-            <View style={styles.levelProgressContainer}>
-              <ThemedText style={styles.levelProgressText}>Level Progress</ThemedText>
-              <View style={styles.progressBarBackground}>
-                <View style={[styles.progressBarFill, { width: `${calculateProgressPercentage()}%` }]} />
-              </View>
-              <View style={styles.progressInfo}>
-                <ThemedText style={styles.levelProgressPercent}>{calculateProgressPercentage()}%</ThemedText>
-                <ThemedText style={styles.levelProgressDetails}>
-                  {userMaterials.length} materials scanned • {userProjects.filter(p => p.is_completed).length} projects completed
-                </ThemedText>
-              </View>
-            </View>
-          </ThemedView>
-          <View style={styles.divider} />
+          {/* Removed Quests-style Summary Section as requested */}
           
           {/* Current Project Section */}
           {currentProject && currentProject.project_name && (
@@ -805,7 +838,7 @@ export default function HomeScreen() {
                       <ThemedText style={styles.tapToViewText}>
                         Tap to view details
                       </ThemedText>
-                      <MaterialIcons name="arrow-forward" size={16} color="#007AFF" />
+                      <MaterialIcons name="chevron-right" size={16} color="#8BC34A" />
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -829,7 +862,7 @@ export default function HomeScreen() {
                 >
                   <View style={styles.showMoreContainer}>
                     <ThemedText style={styles.showMoreText}>Show More</ThemedText>
-                    <MaterialIcons name="chevron-right" size={18} color="#007AFF" />
+                    <MaterialIcons name="chevron-right" size={18} color="#8BC34A" />
                   </View>
                 </Pressable>
               )}
@@ -863,7 +896,7 @@ export default function HomeScreen() {
                         <ThemedText style={styles.tapToViewText}>
                           Tap to view details
                         </ThemedText>
-                        <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                        <MaterialIcons name="chevron-right" size={16} color="#8BC34A" />
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -1011,6 +1044,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
   refreshButton: {
     padding: 8,
@@ -1214,14 +1248,14 @@ const styles = StyleSheet.create({
   showMoreButton: {
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    backgroundColor: 'rgba(139, 195, 74, 0.1)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(0, 122, 255, 0.3)',
+    borderColor: 'rgba(139, 195, 74, 0.3)',
   },
   showMoreText: {
     fontSize: 14,
-    color: '#007AFF',
+    color: '#8BC34A',
     fontWeight: '500',
   },
   materialsContainer: {
@@ -1279,13 +1313,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    backgroundColor: 'rgba(139, 195, 74, 0.1)',
     borderRadius: 12,
     gap: 4,
   },
   tapToViewText: {
     fontSize: 12,
-    color: '#007AFF',
+    color: '#8BC34A',
     fontWeight: '600',
   },
   showMoreContainer: {

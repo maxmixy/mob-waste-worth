@@ -7,6 +7,7 @@ import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { getUserId } from '@/lib/user';
 import { AuthGuard } from '@/components/AuthGuard';
 import { questService } from '@/lib/questService';
+import { notificationService } from '@/lib/notificationService';
 import { useAuth } from '@/contexts/AuthContext';
 import ProjectPhotoModal from '@/components/ProjectPhotoModal';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -181,12 +182,23 @@ function ProjectDetailScreen() {
                     } catch (questError) {
                         console.error('❌ Error tracking step completion quest:', questError);
                     }
+                    
+                    // Add notification for step completion
+                    if (project && project.steps && project.steps[stepIndex]) {
+                        const stepName = project.steps[stepIndex].title || `Step ${stepIndex + 1}`;
+                        notificationService.notifyStepCompleted(project.project_name, stepName);
+                    }
                 }
                 
                 // Check if project is completed and show celebration
                 if (updatedProgress.isCompleted && !progress?.isCompleted) {
                     console.log('🎉 Project completed! Showing celebration...');
                     setShowCompletionCelebration(true);
+                    
+                    // Add notification for project completion
+                    if (project) {
+                        notificationService.notifyProjectCompleted(project.project_name);
+                    }
                     
                     // Track quest progress for recycling project completion
                     console.log('♻️ Tracking recycling project action: Complete project');
@@ -355,7 +367,7 @@ function ProjectDetailScreen() {
 
     if (loading) {
         return (
-            <ThemedView style={styles.loadingContainer}>
+            <ThemedView style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
                 <LogoLoadingAnimation size={120} showBackground={true} />
             </ThemedView>
         );
@@ -363,7 +375,7 @@ function ProjectDetailScreen() {
 
     if (error || !project) {
         return (
-            <ThemedView style={styles.errorContainer}>
+            <ThemedView style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
                 <ThemedText style={styles.errorText}>
                     {error || 'Project not found'}
                 </ThemedText>

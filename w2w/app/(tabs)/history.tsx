@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View, TouchableOpacity, Platform } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View, TouchableOpacity, Platform, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
@@ -46,6 +46,10 @@ export default function HistoryScreen() {
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  const [deletingItemName, setDeletingItemName] = useState<string | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   // Fetch user's scanned materials
   const fetchUserMaterials = async (userId: string) => {
@@ -120,51 +124,106 @@ export default function HistoryScreen() {
     router.push(`/pages/detail?materialId=${materialId}`);
   };
 
+  // Show delete confirmation modal
+  const handleDeleteItem = (materialId: string, materialName: string) => {
+    setDeletingItemId(materialId);
+    setDeletingItemName(materialName);
+    setShowDeleteModal(true);
+  };
+
+  // Cancel delete function
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setDeletingItemId(null);
+    setDeletingItemName(null);
+  };
+
+  // Confirm delete function
+  const confirmDelete = async () => {
+    if (!deletingItemId || !userId) {
+      return;
+    }
+
+    try {
+      setIsProcessingAction(true);
+      
+      // Call backend API to delete the material from user's history
+      const response = await fetch(`${API_BASE_URL}/user/${userId}/materials/${deletingItemId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete scan item');
+      }
+
+      // Remove the item from local state
+      setScanHistory(prevHistory => 
+        prevHistory.filter(item => item.material.id !== deletingItemId)
+      );
+
+      console.log('Scan item deleted successfully');
+    } catch (error) {
+      console.error('Error deleting scan item:', error);
+      setError('Failed to delete scan item');
+    } finally {
+      setIsProcessingAction(false);
+      setShowDeleteModal(false);
+      setDeletingItemId(null);
+      setDeletingItemName(null);
+    }
+  };
+
+  // Load scan history function
+  const loadScanHistory = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      if (!userId) {
+        setError('No user ID found');
+        setLoading(false);
+        return;
+      }
+
+      // Fetch user's materials
+      const userMaterialsData = await fetchUserMaterials(userId);
+      
+      if (userMaterialsData.length > 0) {
+        // Ensure most recent scans appear on top by reversing incoming order
+        const materialsOrdered = [...userMaterialsData].reverse();
+
+        // Fetch details for each material and their projects in display order
+        const historyPromises = materialsOrdered.map(async (materialId: string) => {
+          const materialDetails = await fetchMaterialDetails(materialId);
+          if (materialDetails) {
+            const projects = await fetchRecyclingProjects(materialDetails.Name);
+            return {
+              material: materialDetails,
+              projects: projects,
+              scanDate: new Date().toLocaleString()
+            };
+          }
+          return null;
+        });
+        
+        const historyResults = await Promise.all(historyPromises);
+        const validHistory = historyResults.filter(item => item !== null) as ScanHistoryItem[];
+        setScanHistory(validHistory);
+      } else {
+        setScanHistory([]);
+      }
+    } catch (error) {
+      console.error('Error loading scan history:', error);
+      setError('Failed to load scan history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Load scan history on component mount
   useEffect(() => {
-    const loadScanHistory = async () => {
-      try {
-        setLoading(true);
-        const userId = await getUserId();
-        
-        if (!userId) {
-          setError('No user ID found');
-          setLoading(false);
-          return;
-        }
-
-        // Fetch user's materials
-        const userMaterialsData = await fetchUserMaterials(userId);
-        
-        if (userMaterialsData.length > 0) {
-          // Fetch details for each material and their projects
-          const historyPromises = userMaterialsData.map(async (materialId: string) => {
-            const materialDetails = await fetchMaterialDetails(materialId);
-            if (materialDetails) {
-              const projects = await fetchRecyclingProjects(materialDetails.Name);
-              return {
-                material: materialDetails,
-                projects: projects,
-                scanDate: new Date().toLocaleDateString() // You can add actual scan dates to your backend
-              };
-            }
-            return null;
-          });
-          
-          const historyResults = await Promise.all(historyPromises);
-          const validHistory = historyResults.filter(item => item !== null);
-          setScanHistory(validHistory);
-        }
-      } catch (error) {
-        console.error('Error loading scan history:', error);
-        setError('Failed to load scan history');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadScanHistory();
-  }, []);
+  }, [userId]);
 
   if (loading) {
     return (
@@ -199,7 +258,19 @@ export default function HistoryScreen() {
           <ThemedView style={styles.titleContainer}>
             <ThemedText type="title">History</ThemedText>
           </ThemedView>
-          <View style={styles.headerActions}>
+          <View style={styles.headerButtons}>
+            <Pressable
+              style={styles.refreshButton}
+              onPress={loadScanHistory}
+              disabled={loading}
+              accessibilityLabel="Refresh"
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color={Colors.icon} />
+              ) : (
+                <MaterialIcons name="refresh" size={24} color={Colors.icon} />
+              )}
+            </Pressable>
             <Pressable
               style={styles.settingsButton}
               onPress={() => setSidebarVisible(true)}
@@ -220,33 +291,42 @@ export default function HistoryScreen() {
             {scanHistory.length > 0 ? (
               scanHistory.map((scanItem, index) => (
                 <View key={scanItem.material.id} style={styles.scanCard}>
-              <TouchableOpacity 
-                style={styles.scanCardTop}
-                onPress={() => navigateToMaterialDetail(scanItem.material.id)}
-                activeOpacity={0.7}
-              >
-                <Image
-                  source={scanItem.material.ImageUrl ? { uri: scanItem.material.ImageUrl } : require('@/assets/images/partial-react-logo.png')}
-                  style={styles.scanCardImage}
-                  resizeMode="cover"
-                />
-                <View style={styles.scanCardInfo}>
-                  <ThemedText style={styles.scanCardMaterial}>{scanItem.material.Name}</ThemedText>
-                  <ThemedText style={styles.scanCardTraits}>
-                    {scanItem.material.Traits.slice(0, 3).join(', ')}
-                    {scanItem.material.Traits.length > 3 ? '...' : ''}
-                  </ThemedText>
-                  {scanItem.scanDate && (
-                    <ThemedText style={styles.scanCardDate}>Scanned: {scanItem.scanDate}</ThemedText>
-                  )}
-                  <View style={styles.tapToViewContainer}>
-                    <ThemedText style={styles.tapToViewText}>
-                      Tap to view details
+              <View style={styles.scanCardTop}>
+                <TouchableOpacity 
+                  style={styles.scanCardMainContent}
+                  onPress={() => navigateToMaterialDetail(scanItem.material.id)}
+                  activeOpacity={0.7}
+                >
+                  <Image
+                    source={scanItem.material.ImageUrl ? { uri: scanItem.material.ImageUrl } : require('@/assets/images/partial-react-logo.png')}
+                    style={styles.scanCardImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.scanCardInfo}>
+                    <ThemedText style={styles.scanCardMaterial}>{scanItem.material.Name}</ThemedText>
+                    <ThemedText style={styles.scanCardTraits}>
+                      {scanItem.material.Traits.slice(0, 3).join(', ')}
+                      {scanItem.material.Traits.length > 3 ? '...' : ''}
                     </ThemedText>
-                    <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                    {scanItem.scanDate && (
+                      <ThemedText style={styles.scanCardDate}>Scanned: {scanItem.scanDate}</ThemedText>
+                    )}
+                    <View style={styles.tapToViewContainer}>
+                      <ThemedText style={styles.tapToViewText}>
+                        Tap to view details
+                      </ThemedText>
+                      <MaterialIcons name="chevron-right" size={16} color="#8BC34A" />
+                    </View>
                   </View>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.deleteIconButton}
+                  onPress={() => handleDeleteItem(scanItem.material.id, scanItem.material.Name)}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons name="delete" size={20} color="#e53935" />
+                </TouchableOpacity>
+              </View>
               <View style={styles.scanCardDivider} />
               <View style={styles.scanCardBottom}>
                 <ThemedText style={styles.scanCardProjectsTitle}>Possible Projects:</ThemedText>
@@ -274,7 +354,7 @@ export default function HistoryScreen() {
                           </View>
                           <View style={styles.tapToViewContainer}>
                             <ThemedText style={styles.tapToViewText}>Tap to view</ThemedText>
-                            <MaterialIcons name="chevron-right" size={16} color="#007AFF" />
+                            <MaterialIcons name="chevron-right" size={16} color="#8BC34A" />
                           </View>
                         </View>
                       </TouchableOpacity>
@@ -295,6 +375,51 @@ export default function HistoryScreen() {
           </ThemedView>
         </View>
       </RNScrollView>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelDelete}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModalContainer}>
+            <View style={styles.deleteModalHeader}>
+              <MaterialIcons name="warning" size={24} color="#e74c3c" />
+              <ThemedText type="subtitle" style={styles.deleteModalTitle}>
+                Delete Scan Item
+              </ThemedText>
+            </View>
+            
+            <ThemedText style={styles.deleteModalMessage}>
+              Are you sure you want to delete "{deletingItemName}" from your scan history? This action cannot be undone.
+            </ThemedText>
+            
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                onPress={cancelDelete}
+                style={[styles.deleteModalButton, styles.cancelButton]}
+                disabled={isProcessingAction}
+              >
+                <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={confirmDelete}
+                style={[styles.deleteModalButton, styles.deleteButton]}
+                disabled={isProcessingAction}
+              >
+                {isProcessingAction ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <ThemedText style={styles.deleteButtonText}>Delete</ThemedText>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -378,9 +503,13 @@ const styles = StyleSheet.create({
   titleContainer: {
     flex: 1,
   },
-  headerActions: {
+  headerButtons: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+  },
+  refreshButton: {
+    padding: 8,
   },
   settingsButton: {
     padding: 8,
@@ -458,6 +587,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
+  },
+  scanCardMainContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  deleteIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
   scanCardDivider: {
     height: 1,
@@ -544,13 +687,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    backgroundColor: 'rgba(139, 195, 74, 0.1)',
     borderRadius: 12,
     gap: 4,
   },
   tapToViewText: {
     fontSize: 12,
-    color: '#007AFF',
+    color: '#8BC34A',
     fontWeight: '600',
   },
   materialsHeader: {
@@ -600,5 +743,76 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#ff3b30',
     textAlign: 'center',
+  },
+  // Delete Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deleteModalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  deleteModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  deleteModalTitle: {
+    marginLeft: 12,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  deleteModalMessage: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#666',
+    marginBottom: 24,
+  },
+  deleteModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  deleteModalButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  deleteButton: {
+    backgroundColor: '#e74c3c',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });

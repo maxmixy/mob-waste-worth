@@ -73,6 +73,17 @@ export default function HomeScreen() {
         requestCameraPermission();
         }
     }, [cameraPermission]);
+
+    // Initialize camera when component mounts and when camera becomes ready
+    useEffect(() => {
+        if (cameraPermission?.granted && isFocused) {
+            const timer = setTimeout(() => {
+                setIsCameraReady(true);
+                console.log('[Scan] Camera initialized and ready');
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [cameraPermission?.granted, isFocused]);
     
     // Get location and climate data when component mounts
     useEffect(() => {
@@ -89,9 +100,10 @@ export default function HomeScreen() {
                 // Continue without location/climate data
             }
         };
-        
+
         initializeLocationAndClimate();
     }, []);
+
     
     
     if (!cameraPermission) {
@@ -253,7 +265,19 @@ export default function HomeScreen() {
                     ref={cameraRef}
                     style={{ flex: 1 }}
                     facing="back"
+                    onCameraReady={() => {
+                        console.log('[Scan] Camera ready callback triggered');
+                        setIsCameraReady(true);
+                    }}
                 />
+            )}
+            
+            {/* Camera loading overlay */}
+            {!isCameraReady && isFocused && (
+                <View style={styles.cameraLoadingOverlay}>
+                    <ActivityIndicator size="large" color="#FFFFFF" />
+                    <ThemedText style={styles.cameraLoadingText}>Initializing Camera...</ThemedText>
+                </View>
             )}
             
             {/* Blur overlay for better navigation visibility */}
@@ -279,13 +303,15 @@ export default function HomeScreen() {
                             <MaterialIcons name="qr-code-scanner" size={24} color={getIconColor()} />
                             <ThemedText style={[styles.headerTitle, { color: getTextColor() }]}>Waste Scanner</ThemedText>
                         </View>
-                        <Pressable
-                            style={styles.modernSettingsButton}
-                            onPress={() => setSidebarVisible(true)}
-                            accessibilityLabel="Settings"
-                        >
-                            <MaterialIcons name="settings" size={24} color={getIconColor()} />
-                        </Pressable>
+                        <View style={styles.headerButtons}>
+                            <Pressable
+                                style={styles.modernSettingsButton}
+                                onPress={() => setSidebarVisible(true)}
+                                accessibilityLabel="Settings"
+                            >
+                                <MaterialIcons name="settings" size={24} color={getIconColor()} />
+                            </Pressable>
+                        </View>
                     </View>
                 </BlurView>
             </View>
@@ -425,6 +451,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     // Color will be set dynamically
   },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   modernSettingsButton: {
     padding: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
@@ -562,6 +593,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 12,
     // Color will be set dynamically
+  },
+
+  // Camera loading overlay styles
+  cameraLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 15,
+  },
+  cameraLoadingText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 16,
+    textAlign: 'center',
   },
 
   // Legacy styles (keeping for compatibility)

@@ -12,6 +12,7 @@ import { Colors } from '@/constants/Colors';
 import { getUserId, checkProfileCompletion } from '@/lib/user';
 import { ImageService } from '@/lib/imageService';
 import { questService } from '@/lib/questService';
+import { notificationService } from '@/lib/notificationService';
 
 import { ScrollView as RNScrollView } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -68,6 +69,8 @@ export default function CommunityScreen() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
   const [userProfileImages, setUserProfileImages] = useState<{[userId: string]: string}>({});
+  const [userNames, setUserNames] = useState<{[userId: string]: string}>({});
+  const [userLevels, setUserLevels] = useState<{[userId: string]: string}>({});
   const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
   const [likingPostId, setLikingPostId] = useState<string | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -76,6 +79,128 @@ export default function CommunityScreen() {
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  
+  // Edit/Delete state
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [editPostContent, setEditPostContent] = useState('');
+  const [editExistingImages, setEditExistingImages] = useState<PostMedia[]>([]);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  
+
+  // Edit post function
+  const handleEditPost = (postId: string, currentContent: string, existingMedia: PostMedia[] = []) => {
+    setEditingPostId(postId);
+    setEditPostContent(currentContent);
+    setEditExistingImages(existingMedia);
+    setShowEditModal(true);
+  };
+
+  // Delete post function
+  const handleDeletePost = (postId: string) => {
+    setDeletingPostId(postId);
+    setShowDeleteModal(true);
+  };
+
+  // Confirm delete function
+  const confirmDelete = () => {
+    if (deletingPostId) {
+      deletePost(deletingPostId);
+      setShowDeleteModal(false);
+      setDeletingPostId(null);
+    }
+  };
+
+  // Cancel delete function
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setDeletingPostId(null);
+  };
+
+
+  // Delete post API call
+  const deletePost = async (postId: string) => {
+    try {
+      setIsProcessingAction(true);
+      
+      const response = await fetch(`${API_BASE_URL}/posts/${postId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        // Remove post from both posts array and postData object
+        setPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
+        setPostData(prevData => {
+          const newData = { ...prevData };
+          delete newData[postId];
+          return newData;
+        });
+        setLoadedPosts(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(postId);
+          return newSet;
+        });
+        
+        // Success handled by UI update
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        // Error handling - could add toast notification here
+        console.error('Failed to delete post:', errorData.error || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Error deleting post:', error);
+      // Error handling - could add toast notification here
+      console.error('Failed to delete post');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Update post API call
+  const updatePost = async (postId: string, newContent: string) => {
+    try {
+      setIsProcessingAction(true);
+      
+      const response = await fetch(`${API_BASE_URL}/posts/${postId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content_text: newContent,
+          updated_at: new Date().toISOString()
+        }),
+      });
+
+      if (response.ok) {
+        // Update post in local state
+        setPostData(prevData => ({
+          ...prevData,
+          [postId]: {
+            ...prevData[postId],
+            content_text: newContent,
+            updated_at: new Date().toISOString()
+          }
+        }));
+        setShowEditModal(false);
+        setEditingPostId(null);
+        setEditPostContent('');
+        setEditExistingImages([]);
+        Alert.alert('Success', 'Post updated successfully');
+      } else {
+        Alert.alert('Error', 'Failed to update post');
+      }
+    } catch (error) {
+      console.error('Error updating post:', error);
+      Alert.alert('Error', 'Failed to update post');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
 
   // Post skeleton component for loading states
   const PostSkeleton = ({ postId }: { postId: string }) => (
@@ -162,6 +287,21 @@ export default function CommunityScreen() {
         } catch (questError) {
           console.error('❌ Error tracking community quest:', questError);
         }
+
+        // Send notification for new post
+        try {
+          const profileResult = await checkProfileCompletion(currentUserId);
+          const authorName = profileResult.profileData ? 
+            `${profileResult.profileData.first_name} ${profileResult.profileData.last_name}` : 
+            'Someone';
+          notificationService.notifyNewPost(authorName, postContent.trim());
+        } catch (notificationError) {
+          console.error('❌ Error sending post notification:', notificationError);
+        }
+        
+        // Add success notification for post creation
+        const postTitle = postContent.trim() || 'New Post';
+        notificationService.notifyPostSuccess(postTitle);
         
         Alert.alert('Success', 'Your post has been shared!');
       } else {
@@ -203,9 +343,11 @@ export default function CommunityScreen() {
         });
       }
       
-      // Load profile images for all users in posts
+      // Load profile images and names for all users in posts
       const userIds = [...new Set(data.map((post: PostData) => post.user_id))];
       await loadUserProfileImages(userIds);
+      await loadUserNames(userIds);
+      await loadUserLevels(userIds);
     } catch (err) {
       console.error('Error loading posts:', err);
       setError('Failed to load posts');
@@ -292,6 +434,127 @@ export default function CommunityScreen() {
     console.log('Updated user profile images:', newProfileImages);
   };
 
+  const loadUserNames = async (userIds: string[]) => {
+    console.log('Loading user names for users:', userIds);
+    
+    // Filter out users we already have names for
+    const usersToLoad = userIds.filter(id => !userNames[id]);
+    
+    if (usersToLoad.length === 0) {
+      console.log('All user names already loaded');
+      return;
+    }
+    
+    console.log('Loading user names for new users:', usersToLoad);
+    
+    // Load user names for all users in parallel
+    const namePromises = usersToLoad.map(async (uid) => {
+      try {
+        const profileInfo = await checkProfileCompletion(uid);
+        if (profileInfo.profileCompleted && profileInfo.profileData) {
+          const { firstName, lastName } = profileInfo.profileData;
+          if (firstName && lastName) {
+            return { userId: uid, name: `${firstName} ${lastName}` };
+          }
+        }
+        return { userId: uid, name: uid }; // Fallback to user ID
+      } catch (error) {
+        console.error(`Error loading user name for user ${uid}:`, error);
+        return { userId: uid, name: uid }; // Fallback to user ID
+      }
+    });
+    
+    const results = await Promise.all(namePromises);
+    
+    // Update state with new user names
+    const newUserNames = { ...userNames };
+    results.forEach(({ userId, name }) => {
+      newUserNames[userId] = name;
+    });
+    
+    setUserNames(newUserNames);
+    console.log('Updated user names:', newUserNames);
+  };
+
+  // Compute level from points (same thresholds as Quests)
+  const calculateLevelFromPoints = (points: number): string => {
+    if (points < 50) return 'Eco Beginner';
+    if (points < 150) return 'Eco Explorer';
+    if (points < 300) return 'Eco Warrior';
+    if (points < 500) return 'Eco Champion';
+    if (points < 750) return 'Eco Master';
+    return 'Eco Legend';
+  };
+
+  const loadUserLevels = async (userIds: string[]) => {
+    console.log('Loading user levels for users:', userIds);
+    const usersToLoad = userIds; // Always refresh to avoid stale cache
+
+    // Fetch all quests once to mirror Quests tab calculations
+    let allQuests: Array<{ id: string; points: number }>|null = null;
+    try {
+      const questsRes = await fetch(`${API_BASE_URL}/quests`);
+      const questsData = await questsRes.json().catch(() => null) as any;
+      if (questsData && questsData.success && Array.isArray(questsData.quests)) {
+        allQuests = questsData.quests.map((q: any) => ({ id: q.id, points: q.points }));
+      }
+    } catch (e) {
+      console.warn('Could not fetch quests list for level calc; falling back to stats only');
+    }
+
+    const levelPromises = usersToLoad.map(async (uid) => {
+      try {
+        // Fetch backend stats
+        const [statsRes, progressRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/user/${uid}/quests/stats`),
+          allQuests ? fetch(`${API_BASE_URL}/user/${uid}/quests/progress`) : Promise.resolve(null as any),
+        ]);
+
+        const statsData = await statsRes.json().catch(() => null) as any;
+        let backendPoints = 0;
+        let backendLevel: string | undefined;
+        if (statsData && statsData.success) {
+          backendPoints = statsData.stats?.total_points ?? 0;
+          backendLevel = statsData.stats?.level;
+        }
+
+        // Optionally compute points from completed quests like Quests tab
+        let computedPoints = 0;
+        if (allQuests && progressRes) {
+          const progressData = await progressRes.json().catch(() => null) as any;
+          if (progressData && progressData.success && Array.isArray(progressData.progress)) {
+            const completedIds = new Set(
+              progressData.progress
+                .filter((p: any) => p.is_completed)
+                .map((p: any) => p.quest_id)
+            );
+            computedPoints = allQuests
+              .filter(q => completedIds.has(q.id))
+              .reduce((sum, q) => sum + (q.points || 0), 0);
+          }
+        }
+
+        const actualPoints = Math.max(backendPoints, computedPoints);
+        const level = (backendLevel && actualPoints === backendPoints)
+          ? backendLevel
+          : calculateLevelFromPoints(actualPoints);
+
+        return { userId: uid, level };
+      } catch (error) {
+        console.error(`Error loading user level for user ${uid}:`, error);
+        return { userId: uid, level: 'Eco Beginner' };
+      }
+    });
+
+    const results = await Promise.all(levelPromises);
+    const newLevels: {[userId: string]: string} = { ...userLevels };
+    results.forEach(({ userId, level }) => {
+      newLevels[userId] = level;
+    });
+    setUserLevels(newLevels);
+    console.log('Updated user levels:', newLevels);
+  };
+
   useEffect(() => {
     (async () => {
       const uid = await getUserId();
@@ -305,6 +568,21 @@ export default function CommunityScreen() {
       // Camera permissions are handled by useCameraPermissions hook
     })();
   }, []);
+
+  // Ensure levels stay accurate when posts list changes
+  useEffect(() => {
+    const ensureLevels = async () => {
+      try {
+        const ids = [...new Set(posts.map(p => p.user_id))];
+        if (ids.length > 0) {
+          await loadUserLevels(ids);
+        }
+      } catch (e) {
+        // noop
+      }
+    };
+    ensureLevels();
+  }, [posts]);
 
   const handleLike = async (postId: string) => {
     if (!userId) return;
@@ -459,6 +737,14 @@ export default function CommunityScreen() {
           console.log('✅ Community quest progress updated:', results);
         } catch (questError) {
           console.error('❌ Error tracking community quest:', questError);
+        }
+
+        // Send success notification for post creation
+        try {
+          const postTitle = postText.trim() || 'New Post';
+          notificationService.notifyPostSuccess(postTitle);
+        } catch (notificationError) {
+          console.error('❌ Error sending post notification:', notificationError);
         }
         
         Alert.alert('Success', `Post created successfully with ${imagePaths.length} image${imagePaths.length !== 1 ? 's' : ''}! 🎉`);
@@ -645,7 +931,7 @@ export default function CommunityScreen() {
 
   const usePicture = () => {
     if (capturedImage) {
-      // Add the captured image to the selected images for the post
+      // Add to new post images
       setSelectedImages(prev => [...prev, capturedImage]);
       setCameraVisible(false);
       setCapturedImage(null);
@@ -656,6 +942,7 @@ export default function CommunityScreen() {
   const removeImage = (imageIndex: number) => {
     setSelectedImages(prev => prev.filter((_, index) => index !== imageIndex));
   };
+
 
   const handleComment = async (postId: string) => {
     const commentText = commentTexts[postId] || '';
@@ -685,6 +972,11 @@ export default function CommunityScreen() {
     
     // Update state immediately
     setPosts(updatedPosts);
+    
+    // Load user name for the commenter if not already loaded
+    if (!userNames[userId]) {
+      await loadUserNames([userId]);
+    }
     
     // Clear input for this specific post
     setCommentTexts(prev => {
@@ -717,6 +1009,20 @@ export default function CommunityScreen() {
           c.id === optimisticComment.id ? realComment : c
         );
         setPosts(finalPosts);
+
+        // Send notification for new comment (only if commenting on someone else's post)
+        if (finalPost.user_id !== userId) {
+          try {
+            const profileResult = await checkProfileCompletion(userId);
+            const commenterName = profileResult.profileData ? 
+              `${profileResult.profileData.first_name} ${profileResult.profileData.last_name}` : 
+              'Someone';
+            const postContent = finalPost.content_text || 'your post';
+            notificationService.notifyNewComment(commenterName, postContent);
+          } catch (notificationError) {
+            console.error('❌ Error sending comment notification:', notificationError);
+          }
+        }
       }
     } catch (err) {
       // Revert on error
@@ -759,13 +1065,22 @@ export default function CommunityScreen() {
           <ThemedView style={styles.titleContainer}>
             <ThemedText type="title">Community</ThemedText>
           </ThemedView>
-          <Pressable
-            style={styles.settingsButton}
-            onPress={() => setSidebarVisible(true)}
-            accessibilityLabel="Settings"
-          >
-            <MaterialIcons name="settings" size={24} color={Colors.icon} />
-          </Pressable>
+          <View style={styles.headerButtons}>
+            <Pressable
+              style={styles.refreshButton}
+              onPress={loadPosts}
+              accessibilityLabel="Refresh"
+            >
+              <MaterialIcons name="refresh" size={24} color={Colors.icon} />
+            </Pressable>
+            <Pressable
+              style={styles.settingsButton}
+              onPress={() => setSidebarVisible(true)}
+              accessibilityLabel="Settings"
+            >
+              <MaterialIcons name="settings" size={24} color={Colors.icon} />
+            </Pressable>
+          </View>
         </View>
 
                  {/* Share Post Container - Facebook Style */}
@@ -841,9 +1156,6 @@ export default function CommunityScreen() {
                  size={24} 
                  color={isProcessingAction ? Colors.icon : Colors.primary} 
                />
-               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
-                 Photos
-               </ThemedText>
              </TouchableOpacity>
              <TouchableOpacity 
                style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
@@ -856,9 +1168,6 @@ export default function CommunityScreen() {
                  size={22} 
                  color={isProcessingAction ? Colors.icon : Colors.primary} 
                />
-               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
-                 Links
-               </ThemedText>
              </TouchableOpacity>
              <TouchableOpacity 
                style={[styles.shareActionButton, isProcessingAction && styles.disabledButton]} 
@@ -871,9 +1180,6 @@ export default function CommunityScreen() {
                  size={24} 
                  color={isProcessingAction ? Colors.icon : Colors.primary} 
                />
-               <ThemedText style={[styles.shareActionLabel, isProcessingAction && styles.disabledButtonText]}> 
-                 Camera
-               </ThemedText>
              </TouchableOpacity>
              <TouchableOpacity 
                style={[styles.postButton, (!postText.trim() && selectedImages.length === 0) && styles.postButtonDisabled]}
@@ -896,6 +1202,7 @@ export default function CommunityScreen() {
             const isLoading = loadingPosts.has(post.id);
             const isLoaded = loadedPosts.has(post.id);
             const postDataItem = postData[post.id];
+            
             
             // Show skeleton while loading
             if (isLoading) {
@@ -926,16 +1233,42 @@ export default function CommunityScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <ThemedText style={styles.postUser}>
-                    {postDataItem.user_id === userId && userProfile 
+                    {(userNames[postDataItem.user_id] || (postDataItem.user_id === userId && userProfile 
                       ? `${userProfile.firstName} ${userProfile.lastName}` 
-                      : postDataItem.user_id}
+                      : postDataItem.user_id)) + ` • ${userLevels[postDataItem.user_id] ?? '...'}`}
                   </ThemedText>
                   {postDataItem.created_at && (
                     <ThemedText style={styles.postDate}>
                       {new Date(postDataItem.created_at).toLocaleDateString()}
+                      {postDataItem.updated_at && postDataItem.updated_at !== postDataItem.created_at && (
+                        <ThemedText style={styles.editedIndicator}> • Edited</ThemedText>
+                      )}
                     </ThemedText>
                   )}
                 </View>
+                
+                {/* Edit/Delete buttons for own posts */}
+                {postDataItem.user_id === userId && (
+                  <View style={styles.postActionsMenu}>
+                    <TouchableOpacity 
+                      onPress={() => handleEditPost(postDataItem.id, postDataItem.content_text, postDataItem.media)}
+                      style={styles.actionMenuButton}
+                    >
+                      <MaterialIcons name="edit" size={20} color="#666" />
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={() => handleDeletePost(postDataItem.id)}
+                      style={[
+                        styles.actionMenuButton,
+                        isProcessingAction && { opacity: 0.5 }
+                      ]}
+                      disabled={isProcessingAction}
+                      activeOpacity={0.7}
+                    >
+                      <MaterialIcons name="delete" size={20} color="#e53935" />
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
 
                              {/* Text */}
@@ -984,7 +1317,7 @@ export default function CommunityScreen() {
               {/* Comments */}
               {postDataItem.comments?.slice(0, 2).map((c, i) => (
                 <ThemedText key={i} style={styles.commentText}>
-                  <ThemedText style={{ fontWeight: 'bold' }}>{c.user_id}: </ThemedText>
+                  <ThemedText style={{ fontWeight: 'bold' }}>{userNames[c.user_id] || c.user_id}: </ThemedText>
                   {c.comment_text}
                 </ThemedText>
               ))}
@@ -1176,6 +1509,122 @@ export default function CommunityScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Edit Post Modal */}
+      <Modal
+        visible={showEditModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          setShowEditModal(false);
+          setEditingPostId(null);
+          setEditPostContent('');
+          setEditExistingImages([]);
+        }}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity
+              onPress={() => {
+                setShowEditModal(false);
+                setEditingPostId(null);
+                setEditPostContent('');
+                setEditExistingImages([]);
+              }}
+              style={styles.closeButton}
+            >
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+            <ThemedText style={styles.modalTitle}>Edit Post</ThemedText>
+            <TouchableOpacity
+              onPress={() => editingPostId && updatePost(editingPostId, editPostContent)}
+              style={[styles.saveButton, { opacity: editPostContent.trim() ? 1 : 0.5 }]}
+              disabled={!editPostContent.trim() || isProcessingAction}
+            >
+              {isProcessingAction ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <ThemedText style={styles.saveButtonText}>Save</ThemedText>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalContent}>
+            <TextInput
+              style={styles.editTextInput}
+              value={editPostContent}
+              onChangeText={setEditPostContent}
+              placeholder="What's on your mind?"
+              multiline
+              textAlignVertical="top"
+              maxLength={500}
+            />
+            <ThemedText style={styles.characterCount}>
+              {editPostContent.length}/500
+            </ThemedText>
+
+            {/* Existing Images - Read Only */}
+            {editExistingImages.length > 0 && (
+              <View style={styles.existingImagesContainer}>
+                <ThemedText style={styles.existingImagesLabel}>Images in this post:</ThemedText>
+                <RNScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesScrollView}>
+                  {editExistingImages.map((media, index) => (
+                    <View key={index} style={styles.readOnlyImageContainer}>
+                      <Image source={{ uri: media.media_path }} style={styles.selectedImage} resizeMode="cover" />
+                    </View>
+                  ))}
+                </RNScrollView>
+              </View>
+            )}
+
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelDelete}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModalContainer}>
+            <View style={styles.deleteModalHeader}>
+              <MaterialIcons name="warning" size={24} color="#e74c3c" />
+              <ThemedText type="subtitle" style={styles.deleteModalTitle}>
+                Delete Post
+              </ThemedText>
+            </View>
+            
+            <ThemedText style={styles.deleteModalMessage}>
+              Are you sure you want to delete this post? This action cannot be undone and will permanently remove the post, all its comments, and likes.
+            </ThemedText>
+            
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                onPress={cancelDelete}
+                style={[styles.deleteModalButton, styles.cancelButton]}
+                disabled={isProcessingAction}
+              >
+                <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={confirmDelete}
+                style={[styles.deleteModalButton, styles.deleteButton]}
+                disabled={isProcessingAction}
+              >
+                {isProcessingAction ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <ThemedText style={styles.deleteButtonText}>Delete</ThemedText>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -1193,6 +1642,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 16,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  refreshButton: {
+    padding: 8,
   },
   settingsButton: {
     padding: 8,
@@ -1586,6 +2043,22 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 8,
   },
+  existingImagesContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#ddd',
+  },
+  existingImagesLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#888',
+    marginBottom: 8,
+  },
+  readOnlyImageContainer: {
+    position: 'relative',
+    marginRight: 8,
+  },
   imagesScrollView: {
     maxHeight: 100,
   },
@@ -1740,5 +2213,107 @@ const styles = StyleSheet.create({
     height: 20,
     backgroundColor: '#e0e0e0',
     borderRadius: 4,
+  },
+  postActionsMenu: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionMenuButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+  },
+  editedIndicator: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic',
+  },
+  editTextInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    minHeight: 120,
+    maxHeight: 200,
+    backgroundColor: '#fff',
+  },
+  characterCount: {
+    textAlign: 'right',
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  // Delete Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deleteModalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  deleteModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  deleteModalTitle: {
+    marginLeft: 12,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  deleteModalMessage: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#666',
+    marginBottom: 24,
+  },
+  deleteModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  deleteModalButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  deleteButton: {
+    backgroundColor: '#e74c3c',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });

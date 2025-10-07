@@ -8,6 +8,7 @@ import { useLocation } from '@/hooks/useLocation';
 import { useClimateStorage } from '@/hooks/useClimateStorage';
 import LogoLoadingAnimation from '@/components/LogoLoadingAnimation';
 import { questService } from '@/lib/questService';
+import { notificationService } from '@/lib/notificationService';
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthGuard } from '@/components/AuthGuard';
 import EducationalContentModal from '@/components/EducationalContentModal';
@@ -693,6 +694,11 @@ function DetailScreen() {
             
             if (response.ok) {
                 console.log('Scan logged successfully');
+                
+                // Add notification for material scanning
+                if (pageData?.material) {
+                    notificationService.notifyMaterialScanned(pageData.material.Name);
+                }
             } else {
                 console.error('Failed to log scan:', response.status);
             }
@@ -724,6 +730,11 @@ function DetailScreen() {
             if (response.ok) {
                 const result = await response.json();
                 console.log('Custom project generated:', result.project);
+                
+                // Add notification for project creation
+                if (result.project) {
+                    notificationService.notifyProjectCreated(result.project.project_name);
+                }
                 
                 // Add the new project to the existing projects
                 if (result.project && pageData) {
@@ -846,7 +857,7 @@ function DetailScreen() {
 
     if (loading) {
         return (
-            <ThemedView style={styles.loadingContainer}>
+            <ThemedView style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
                 <LogoLoadingAnimation size={120} showBackground={true} />
             </ThemedView>
         );
@@ -854,7 +865,7 @@ function DetailScreen() {
 
     if (error) {
         return (
-            <ThemedView style={styles.errorContainer}>
+            <ThemedView style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
                 <ThemedText style={styles.errorText}>{error}</ThemedText>
             </ThemedView>
         );
@@ -862,7 +873,7 @@ function DetailScreen() {
 
     if (!pageData) {
         return (
-            <ThemedView style={styles.errorContainer}>
+            <ThemedView style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
                 <ThemedText style={styles.errorText}>No material data available</ThemedText>
             </ThemedView>
         );
@@ -1434,13 +1445,13 @@ const styles = StyleSheet.create({
         marginTop: 8,
         paddingVertical: 4,
         paddingHorizontal: 8,
-        backgroundColor: 'rgba(0, 122, 255, 0.1)',
+        backgroundColor: 'rgba(139, 195, 74, 0.1)',
         borderRadius: 12,
         gap: 4,
     },
     tapToViewText: {
         fontSize: 12,
-        color: '#007AFF',
+        color: '#8BC34A',
         fontWeight: '600',
     },
     noProjectsText: {

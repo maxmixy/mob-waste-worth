@@ -15,12 +15,12 @@ export default function ProfileCreationPage() {
   const [loadingData, setLoadingData] = useState(true);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [age, setAge] = useState('');
+  const [birthdate, setBirthdate] = useState('');
   const [location, setLocation] = useState('');
   const [interests, setInterests] = useState('');
   const [firstNameError, setFirstNameError] = useState('');
   const [lastNameError, setLastNameError] = useState('');
-  const [ageError, setAgeError] = useState('');
+  const [birthdateError, setBirthdateError] = useState('');
 
   // Load existing profile data when component mounts
   useEffect(() => {
@@ -37,8 +37,15 @@ export default function ProfileCreationPage() {
           const data = profileInfo.profileData;
           setFirstName(data.firstName || '');
           setLastName(data.lastName || '');
-          setAge(data.age ? data.age.toString() : '');
-          setLocation(data.location || '');
+          setBirthdate(data.birthdate ? new Date(data.birthdate).toLocaleDateString() : '');
+          setLocation(
+            data.location ? 
+              (typeof data.location === 'string' ? 
+                data.location : 
+                `${data.location.latitude?.toFixed(4)}, ${data.location.longitude?.toFixed(4)}`
+              ) : 
+              ''
+          );
           setInterests(data.interests || '');
         }
       }
@@ -57,7 +64,7 @@ export default function ProfileCreationPage() {
     setLoading(true);
     setFirstNameError('');
     setLastNameError('');
-    setAgeError('');
+    setBirthdateError('');
 
     // Validation
     if (!firstName.trim()) {
@@ -70,18 +77,20 @@ export default function ProfileCreationPage() {
       setLoading(false);
       return;
     }
-    if (!age.trim()) {
-      setAgeError('Age is required.');
+    if (!birthdate.trim()) {
+      setBirthdateError('Birthdate is required.');
       setLoading(false);
       return;
     }
-    
-    const ageNum = parseInt(age);
-    if (isNaN(ageNum) || ageNum < 18 || ageNum > 120) {
-      setAgeError('Please enter a valid age (18-120).');
+
+    // Validate birthdate format (MM/DD/YYYY)
+    const birthdateRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/;
+    if (!birthdateRegex.test(birthdate)) {
+      setBirthdateError('Please enter a valid birthdate (MM/DD/YYYY).');
       setLoading(false);
       return;
     }
+
 
     try {
       const userId = await getUserId();
@@ -98,7 +107,7 @@ export default function ProfileCreationPage() {
         const profileData = {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          age: ageNum,
+          birthdate: new Date(birthdate).toISOString(),
           location: location.trim(),
           interests: interests.trim(),
           profilePicture: defaultProfilePic,
@@ -155,10 +164,6 @@ export default function ProfileCreationPage() {
       </ThemedView>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <ThemedText type="subtitle" style={styles.subtitle}>
-          Update your profile information
-        </ThemedText>
-
         <ThemedView style={styles.formContainer}>
           {/* First Name */}
           <ThemedView style={styles.inputGroup}>
@@ -202,26 +207,26 @@ export default function ProfileCreationPage() {
             {lastNameError ? <ThemedText style={styles.errorText}>{lastNameError}</ThemedText> : null}
           </ThemedView>
 
-          {/* Age */}
+          {/* Birthdate */}
           <ThemedView style={styles.inputGroup}>
-            <ThemedText style={styles.label}>Age *</ThemedText>
+            <ThemedText style={styles.label}>Birthdate *</ThemedText>
             <TextInput
               style={[
                 styles.input,
                 { 
                     backgroundColor: Colors.background,
-                    borderColor: ageError ? '#f44336' : Colors.text + '20',
+                    borderColor: birthdateError ? '#f44336' : Colors.text + '20',
                     color: Colors.text
                 }
               ]}
-              value={age}
-              onChangeText={setAge}
-              placeholder="Enter your age"
+              value={birthdate}
+              onChangeText={setBirthdate}
+              placeholder="MM/DD/YYYY"
               placeholderTextColor={Colors.text + '60'}
               keyboardType="numeric"
-              maxLength={3}
+              maxLength={10}
             />
-            {ageError ? <ThemedText style={styles.errorText}>{ageError}</ThemedText> : null}
+            {birthdateError ? <ThemedText style={styles.errorText}>{birthdateError}</ThemedText> : null}
           </ThemedView>
 
           {/* Location */}
@@ -283,6 +288,7 @@ export default function ProfileCreationPage() {
           </TouchableOpacity>
         </ThemedView>
       </ScrollView>
+
     </ThemedView>
   );
 }
