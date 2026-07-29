@@ -67,7 +67,7 @@ def init_gemini():
     """Initialize Gemini API"""
     global client
     try:
-        client = genai.Client(api_key="AIzaSyDRT3lI3JrVKvg41ZbIp1l2Hibilae7EWU")
+        client = genai.Client(api_key="Get your own key man")
     
         print("Gemini API initialized successfully")
         return True
@@ -81,7 +81,7 @@ db = init_firestore()
 gemini_initialized = init_gemini()
 
 # Unsplash API setup
-UNSPLASH_ACCESS_KEY = "1iBibObcGpjQYY_WbLkzlqZNIJ5I0AGoCMYu4o2JHec"  # Replace with your actual access key
+UNSPLASH_ACCESS_KEY = "It's easy to get a key yourself"  
 UNSPLASH_BASE_URL = "https://api.unsplash.com"
 
 app = Flask(__name__)
